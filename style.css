@@ -1,0 +1,24 @@
+@import "modern-normalize.css";
+
+:root {
+    --bg: #181818;
+}
+
+html,
+body {
+    background-color: var(--bg);
+    color: white;
+}
+
+body {
+    width: 100%;
+    min-height: 100dvh;
+}
+
+#content {
+    width: 100%;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}

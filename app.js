@@ -8,8 +8,26 @@ const GROUP_PARAMETER = "groupName"
  * @typedef Result<T>
  * @type {object}
  * @property {T} data
+ * @property {any} err
  * @property {bool} ok
  */
+
+
+/**
+ * @param {string} uri 
+ * @returns {Promise<Result<unknown>>}
+ */
+async function fetch_json(uri) {
+    const req = await fetch(uri)
+    if (!req.ok) return { ok: false }
+    let data;
+    try {
+        data = await req.json()
+    } catch (e) {
+        return { ok: false }
+    }
+    return { ok: true, data }
+}
 
 /**
  * @typedef Schedule_Response
@@ -28,9 +46,18 @@ const GROUP_PARAMETER = "groupName"
 
 /**
  * @typedef Lesson_Element_Response
- * @type {string[]}
+ * @type {object}
+ * @property {number} timeIndex
+ * @property {string|null} description
+ * @property {string|null} room
+ * @property {string|null} studyType
+ * @property {string|null} subject
+ * @property {string|null} teacher
+ * for some reason these are both null, always
+ * @property {null} endTime
+ * @property {null} startTime
+ * @property {null} groupName
 */
-
 
 
 
@@ -38,17 +65,10 @@ const GROUP_PARAMETER = "groupName"
  * @param {string} group
  * @returns {Promise<Result<Schedule_Response>>}
  */
-const get_schedule_raw = async (group) => {
+async function get_schedule_raw(group) {
     const group_param = encodeURIComponent(group)
-    const req = await fetch(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}`)
-    if (!req.ok) return { ok: false }
-    let data;
-    try {
-        data = await req.json()
-    } catch (e) {
-        return { ok: false }
-    }
-    return { ok: true, data }
+    // https://lks-api.nntu.ru/lesson-schedule/schedule/lks?date=2026-09-03T00:00:00.000Z
+    return await fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}&date=2026-09-13T00:00:00.000Z`)
 }
 
 /**
@@ -61,24 +81,39 @@ const get_schedule_raw = async (group) => {
  * @param {string} group
  * @returns {Promise<Result<Groups_Response>>}
  */
-const get_groups = async () => {
-    const req = await fetch(`${BASE_PATH}${GROUPS_PATH}`)
-    if (!req.ok) return { ok: false }
-    let data;
-    try {
-        data = await req.json()
-    } catch (e) {
-        return { ok: false }
-    }
-    return { ok: true, data }
+async function get_groups_raw() {
+    return await fetch_json(`${BASE_PATH}${GROUPS_PATH}`)
 }
 
-const main = async () => {
+
+
+
+
+
+const playground = async () => {
     const group = "М26-ИСТ-3"
     const schedule = await get_schedule_raw(group)
-    console.log("schedule", schedule)
-    const groups = await get_groups()
+    console.log("schedule", schedule.data)
+    const groups = await get_groups_raw()
     console.log("groups", groups.data)
+
+    const lesson = schedule.data.currentWeek[2].lessonElements[2]
+    console.log("lesson", lesson)
+
+
+    const content = document.querySelector("#content")
+
+    const lesson_element = document.createElement("div")
+    lesson_element.setAttribute("class", "lesson")
+
+    lesson_element.innerHTML = `
+        <h1>${lesson.subject}</h1>
+        <h2>${lesson.teacher}</h2>
+        <p>${lesson.description}</p>
+    `;
+
+
+    content.replaceChildren(lesson_element)
 }
 
-main()
+playground()
