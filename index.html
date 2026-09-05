@@ -9,8 +9,11 @@
     <!-- <link rel="stylesheet" href="static/normalize.min.css"> -->
     <!-- <link rel="stylesheet" href="static/buttons.min.css"> -->
     <link rel="stylesheet" href="style.css">
+    <script src="app.js"></script>
+
     <script>
-        if ("serviceWorker" in navigator) {
+        // TODO: re-enable this for prod
+        if ("serviceWorker" in navigator && false) {
             navigator.serviceWorker.register("/sw.js").then(
                 (registration) => {
                     console.log("Service worker registration succeeded:", registration);
@@ -22,8 +25,10 @@
         } else {
             console.error("Service workers are not supported.");
         }
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+            window.location.reload();
+        });
     </script>
-    <script src="app.js"></script>
 </head>
 
 <body>

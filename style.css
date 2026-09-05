@@ -5,6 +5,12 @@
 
     --bg: #181818;
     --border: #606060;
+    --text-fg: #fefefe;
+    --text-muted: #bbbbbb;
+
+    --lecture: #ff6000;
+    --practice: rgb(34 185 87);
+    --lab: rgb(34 185 87);
 }
 
 html,
@@ -21,12 +27,136 @@ body {
 #content {
     width: 100%;
 
+    padding: 2em;
+
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 
-.lesson {
+
+.schedule {
+    width: 100%;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5em;
+}
+
+.day {
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    max-width: 100%;
+    width: 620px;
+
+    display: flex;
+    flex-direction: column;
+
+    .lesson,
+    .header {
+        padding: 0.75em;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .header {
+        .week-day {
+            font-weight: 600;
+        }
+
+        font-size: 1.1em;
+    }
+
+    :last-child {
+        border-bottom: none;
+    }
+}
+
+.lesson {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    width: 100%;
+
+
+    .time-slot {
+        /* TODO: maybe monospace font? */
+        /* font-family: monospace; */
+
+        .end,
+        .sep {
+            color: var(--text-muted)
+        }
+    }
+
+    .time-sep {
+        color: var(--text-muted)
+    }
+
+
+    .type {
+        .icon {
+            color: inherit;
+            filter: brightness(60%);
+        }
+    }
+
+    .practice {
+        color: var(--practice);
+    }
+
+    .lecture {
+        color: var(--lecture);
+    }
+
+    .lab {
+        color: var(--lab);
+    }
+}
+
+
+
+.icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+
+    svg {
+        color: inherit;
+    }
+}
+
+.with-icon {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25em;
+}
+
+/* UTILITIES */
+
+.flex-row {
+    display: flex;
+    flex-direction: row;
+}
+
+.gap-1 {
+    gap: 0.25em;
+}
+
+.gap-2 {
+    gap: 0.5em;
+}
+
+.gap-3 {
+    gap: 0.75em;
+}
+
+.gap-4 {
+    gap: 1em;
+}
+
+.muted {
+    color: var(--text-muted);
 }
