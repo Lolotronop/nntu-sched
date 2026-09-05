@@ -101,8 +101,7 @@ async function fetch_json(uri) {
  */
 async function get_schedule_raw(group) {
     const group_param = encodeURIComponent(group)
-    // https://lks-api.nntu.ru/lesson-schedule/schedule/lks?date=2026-09-03T00:00:00.000Z
-    return await fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}&date=2026-09-13T00:00:00.000Z`)
+    return await fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}`)
 }
 
 /**
@@ -112,7 +111,6 @@ async function get_schedule_raw(group) {
 
 
 /**
- * @param {string} group
  * @returns {Promise<Result<Groups_Response>>}
  */
 async function get_groups_raw() {
@@ -137,7 +135,7 @@ async function get_groups_raw() {
  */
 
 /**
- * @param {string} slots expected to have only the actual times here
+ * @param {string} slots expected to have only the actual times here, not the category title that is present in the Schedule_Response
  * @returns {Result<Time_Slot, string>}
  */
 function parse_time_slot(slots) {
@@ -235,20 +233,25 @@ const RU_MONTH_NAMES = {
     декабря: 11,
 };
 
-function parse_ru_date(text, year = new Date().getFullYear()) {
-    const match = text
+/**
+ * @param {string} str
+ * @param {number} year
+ * @returns {Result<Date, string}
+ */
+function parse_ru_date(str, year = new Date().getFullYear()) {
+    const match = str
         .toLowerCase()
         .match(/^(?:[а-яё]+),\s*(\d{1,2})\s+([а-яё]+)$/);
 
     if (!match) {
-        throw new Error("Invalid date format");
+        return err("Invalid date format");
     }
 
     const day = Number(match[1]);
     const month = RU_MONTH_NAMES[match[2]];
 
     if (month === undefined) {
-        throw new Error("Invalid month");
+        return err("Invalid month");
     }
 
     const date = new Date(year, month, day);
@@ -258,10 +261,10 @@ function parse_ru_date(text, year = new Date().getFullYear()) {
         date.getMonth() !== month ||
         date.getDate() !== day
     ) {
-        throw new Error("Invalid calendar date");
+        return err("Invalid calendar date");
     }
 
-    return date;
+    return ok(date);
 }
 
 /**
@@ -274,15 +277,14 @@ function parse_ru_date(text, year = new Date().getFullYear()) {
 
 /**
  * @param {Day_Response} raw
- * @returns {Day}
+ * @returns {Result<Day, string>}
  */
 function parse_day_from_response(raw) {
-    const lessons = raw.lessonElements.map(parse_lesson_from_response).filter(el => el.ok).map(el => el.data)
+    const lessons = raw.lessonElements.map(parse_lesson_from_response).filter(el => el.ok).map(el => el.data);
+    const date_res = parse_ru_date(raw.dayOfTheWeek);
+    if (!date_res.ok) return err(date_res.err);
 
-    return {
-        date: parse_ru_date(raw.dayOfTheWeek),
-        lessons
-    }
+    return ok({ date: date_res.data, lessons });
 }
 
 
@@ -483,15 +485,20 @@ function DayHeader(date, has_lessons) {
     }).format(date);
     date_str = `, ${date_str}`
 
+    const now = new Date();
+    const is_today = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+
+    const header_class = is_today ? "header today" : "header"
+
 
     if (!has_lessons) {
-        return el("div", { class: "header" },
+        return el("div", { class: header_class },
             el("span", { class: "week-day muted" }, weekday),
             el("span", { class: "muted" }, date_str),
             el("span", { class: "muted" }, " - пар нет")
         )
     } else {
-        return el("div", { class: "header" },
+        return el("div", { class: header_class },
             el("span", { class: "week-day" }, weekday),
             el("span", { class: "muted" }, date_str),
         )
@@ -554,10 +561,10 @@ const playground = async () => {
 
     const content = document.querySelector("#content");
 
-    const current_week = schedule_raw.data.currentWeek.map(parse_day_from_response)
-    const next_week = schedule_raw.data.nextWeek.map(parse_day_from_response)
+    const current_week = schedule_raw.data.currentWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data);
+    const next_week = schedule_raw.data.nextWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data)
 
-    content.replaceChildren(Schedule(current_week, time_slots));
+    content.replaceChildren(Schedule(next_week, time_slots));
 }
 
 playground()
