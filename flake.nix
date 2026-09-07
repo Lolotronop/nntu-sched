@@ -16,7 +16,10 @@
           nntu-sched = pkgs.runCommand "nntu-sched" { } ''
             mkdir -p $out
             cp ${./index.html} $out/index.html
+            cp ${./app.js} $out/app.js
             cp ${./style.css} $out/style.css
+            cp ${./modern-normalize.css} $out/modern-normalize.css
+            cp ${./sw.js} $out/sw.js
           '';
         in
         {
