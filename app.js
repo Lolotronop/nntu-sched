@@ -354,7 +354,7 @@ function el(type, options, ...children) {
     const el = document.createElement(type)
     for (let [key, value] of Object.entries(options)) {
         if (key.startsWith("on")) {
-            el.addEventListener(key, value)
+            el.addEventListener(key.slice(2), value)
         } else {
             el.setAttribute(key, value)
         }
@@ -530,6 +530,66 @@ function Schedule(days, time_slots) {
 }
 
 
+/**
+ * @typedef App_State
+ * @type {object}
+ * @property {bool} show_next
+ * @property {Day[]} current_week
+ * @property {Day[]} next_week
+ * @property {Time_Slot[]} time_slots
+*/
+
+
+/**
+ * @typedef Event_Change_Week
+ * @type {object}
+ * @property {"change_week"} type
+ * @property {bool} show_next
+*/
+
+
+/**
+ * @typedef App_Event
+ * @type {Event_Change_Week}
+*/
+
+
+
+
+/**
+ * @param {App_State} state
+ * @param {(ev: App_Event) => void} event_handler
+ * @returns {HTMLElement}
+ */
+function App(state, event_handler) {
+    let week_to_show;
+    if (state.show_next) {
+        week_to_show = state.next_week;
+    } else {
+        week_to_show = state.current_week;
+    }
+
+    return el("div", { class: "flex-col gap-4", style: "width: 100%;" },
+        el("div", { class: "week-selector" },
+            el("button", {
+                class: !state.show_next ? "selected" : "",
+                onclick: () => event_handler({
+                    type: "change_week", show_next: false
+                })
+            }, "Эта неделя"),
+            el("button", {
+                class: state.show_next ? "selected" : "",
+                onclick: () => event_handler({
+                    type: "change_week", show_next: true
+                })
+            }, "Следующая неделя"),
+        ),
+        Schedule(week_to_show, state.time_slots)
+    );
+}
+
+
+
 const playground = async () => {
     const group = "М26-ИСТ-3"
     const schedule_raw = await get_schedule_raw(group)
@@ -564,7 +624,25 @@ const playground = async () => {
     const current_week = schedule_raw.data.currentWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data);
     const next_week = schedule_raw.data.nextWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data)
 
-    content.replaceChildren(Schedule(next_week, time_slots));
+    /** @var {App_State} */
+    const state = {
+        current_week,
+        next_week,
+        time_slots,
+        show_next: false,
+    };
+
+    /**
+     * @param {App_Event} ev 
+     */
+    function handler(ev) {
+        if (ev.type === "change_week") {
+            state.show_next = ev.show_next;
+            content.replaceChildren(App(state, handler))
+        }
+    }
+
+    content.replaceChildren(App(state, handler));
 }
 
 playground()
