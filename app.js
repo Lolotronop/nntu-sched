@@ -165,7 +165,7 @@ function parse_time_slot(slots) {
 
     if (!start_res.ok || !end_res.ok) return err(`Parse of start or end failed. start: ${start_res.err} or end: ${start_res.err}`)
 
-    return ok({ start: start_res.data, end: start_res.data })
+    return ok({ start: start_res.data, end: end_res.data })
 }
 
 
