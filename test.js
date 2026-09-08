@@ -169,6 +169,13 @@ async function download_all_groups() {
  * @returns {number}
  */
 function find_or_create(arr, item) {
+    if (item === null || item === undefined) return -1;
+
+    if (typeof item === "string") {
+        item = item.trim();
+        if (item === "") return -1;
+    }
+
     let eq = (a, b) => a === b;
     if (item instanceof Date) {
         eq = (a, b) => a.getTime() === b.getTime();
@@ -234,6 +241,28 @@ async function playground() {
                 lesson_element.description === null
         }
 
+        const lesson_has_empty_elements = (lesson_element) => {
+            return lesson_element.startTime === null ||
+                lesson_element.endTime === null ||
+                lesson_element.subject === '' ||
+                lesson_element.studyType === '' ||
+                lesson_element.room === '' ||
+                lesson_element.teacher === '' ||
+                lesson_element.groupName === null
+        }
+
+        const lesson_empty_elements = (lesson_element) => {
+            const empty = [];
+            if (lesson_element.startTime === null) empty.push("startTime");
+            if (lesson_element.endTime === null) empty.push("endTime");
+            if (lesson_element.subject === '') empty.push("subject");
+            if (lesson_element.studyType === '') empty.push("studyType");
+            if (lesson_element.room === '') empty.push("room");
+            if (lesson_element.teacher === '') empty.push("teacher");
+            if (lesson_element.groupName === null) empty.push("groupName");
+            return empty;
+        }
+
 
         const days = [...json.currentWeek, ...json.nextWeek];
         for (const { dayOfTheWeek, lessonElements } of days) {
@@ -247,6 +276,12 @@ async function playground() {
                     continue;
                 }
 
+                // if (lesson_has_empty_elements(lesson_element)) {
+                //     const empty = lesson_empty_elements(lesson_element);
+                //     console.warn("empty elements:", empty.join(", "), lesson_element)
+                //     continue;
+                // }
+
                 lesson.subject_id = find_or_create(schedule.subjects, lesson_element.subject);
                 lesson.teacher_id = find_or_create(schedule.teachers, lesson_element.teacher);
                 lesson.room_id = find_or_create(schedule.rooms, lesson_element.room);
@@ -259,19 +294,21 @@ async function playground() {
     }
     console.timeEnd("parse")
 
-    console.time("filter")
-    const target_group = "23-СК"
-    const target_group_id = schedule.groups.findIndex(el => el === target_group);
-    if (target_group_id === -1) {
-        console.error(`Failed to find group ${target_group}`)
-    }
-    const lessons = schedule.lessons.filter(el => el.group_id === target_group_id);
-    console.log(lessons)
-    console.timeEnd("filter")
+    console.log(schedule)
 
-    const file = await fs.open("./sched.json", "w")
-    await file.write(JSON.stringify(schedule))
-    await file.close()
+    // console.time("filter")
+    // const target_group = "23-СК"
+    // const target_group_id = schedule.groups.findIndex(el => el === target_group);
+    // if (target_group_id === -1) {
+    //     console.error(`Failed to find group ${target_group}`)
+    // }
+    // const lessons = schedule.lessons.filter(el => el.group_id === target_group_id);
+    // console.log(lessons)
+    // console.timeEnd("filter")
+
+    // const file = await fs.open("./sched.json", "w")
+    // await file.write(JSON.stringify(schedule))
+    // await file.close()
 }
 
 playground();
