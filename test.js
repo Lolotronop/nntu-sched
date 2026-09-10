@@ -206,6 +206,9 @@ async function playground() {
     const files = await fs.readdir("./thing")
     for (const file of files) {
         const file_path = `./thing/${file}`
+        if (!file_path.endsWith(".json")) {
+            continue;
+        }
         const data = await fs.readFile(file_path, "utf-8")
         /** @type {Schedule_Response} */
         let json;
@@ -294,7 +297,14 @@ async function playground() {
     }
     console.timeEnd("parse")
 
-    console.log(schedule)
+    console.log("Lessons: ", schedule.lessons.length)
+    console.log("Subjects: ", schedule.subjects.length)
+    console.log("Teachers: ", schedule.teachers.length)
+    console.log("Rooms: ", schedule.rooms.length)
+    console.log("Types: ", schedule.types.length)
+    console.log("Groups: ", schedule.groups.length)
+    console.log("Dates: ", schedule.dates.length)
+    console.log("Time Slots: ", schedule.time_slots.length)
 
     // console.time("filter")
     // const target_group = "23-СК"
@@ -306,7 +316,7 @@ async function playground() {
     // console.log(lessons)
     // console.timeEnd("filter")
 
-    // const file = await fs.open("./sched.json", "w")
+    // const file = await fs.open("./thing/sched.json", "w")
     // await file.write(JSON.stringify(schedule))
     // await file.close()
 }

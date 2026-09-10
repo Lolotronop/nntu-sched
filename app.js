@@ -541,51 +541,58 @@ function Schedule(days, time_slots) {
 
 
 /**
- * @typedef Event_Change_Week
- * @type {object}
- * @property {"change_week"} type
- * @property {bool} show_next
-*/
-
-
-/**
- * @typedef App_Event
- * @type {Event_Change_Week}
-*/
-
-
-
+ * @param {App_State} state
+ * @param {() => void} onselect
+ * @returns {HTMLElement}
+ */
+function SelectorButtons(state, onselect) {
+    return el("div", { class: "week-selector" },
+        el("button", {
+            class: !state.show_next ? "selected" : "",
+            onclick: () => {
+                state.show_next = false;
+                onselect();
+            }
+        }, "Эта неделя"),
+        el("button", {
+            class: state.show_next ? "selected" : "",
+            onclick: () => {
+                state.show_next = true;
+                onselect();
+            }
+        }, "Следующая неделя"),
+    )
+}
 
 /**
  * @param {App_State} state
- * @param {(ev: App_Event) => void} event_handler
  * @returns {HTMLElement}
  */
-function App(state, event_handler) {
-    let week_to_show;
-    if (state.show_next) {
-        week_to_show = state.next_week;
-    } else {
-        week_to_show = state.current_week;
+function App(state) {
+    const current_week = Schedule(state.current_week, state.time_slots)
+    const next_week = Schedule(state.next_week, state.time_slots)
+
+    let selected_week = state.show_next ? next_week : current_week;
+
+    const handle_change = () => {
+        const new_week = state.show_next ? next_week : current_week;
+        selected_week.replaceWith(new_week)
+        selected_week = new_week;
+        console.log("changed")
+
+        const new_buttons = SelectorButtons(state, handle_change)
+        buttons.replaceWith(new_buttons)
+        buttons = new_buttons;
     }
 
-    return el("div", { class: "flex-col gap-4", style: "width: 100%;" },
-        el("div", { class: "week-selector" },
-            el("button", {
-                class: !state.show_next ? "selected" : "",
-                onclick: () => event_handler({
-                    type: "change_week", show_next: false
-                })
-            }, "Эта неделя"),
-            el("button", {
-                class: state.show_next ? "selected" : "",
-                onclick: () => event_handler({
-                    type: "change_week", show_next: true
-                })
-            }, "Следующая неделя"),
-        ),
-        Schedule(week_to_show, state.time_slots)
+    let buttons = SelectorButtons(state, handle_change);
+
+    let self = el("div", { class: "flex-col gap-4", style: "width: 100%;" },
+        buttons,
+        selected_week
     );
+
+    return self;
 }
 
 
@@ -598,9 +605,6 @@ const playground = async () => {
         console.error("get_schedule_raw failed")
         return
     }
-
-    const all_teachers = new Set(schedule_raw.data.currentWeek.flatMap(el => el.lessonElements).map(el => el.teacher))
-    console.log(all_teachers)
 
     const time_slots_raw = schedule_raw.data.times
     // remove the first "title" element
@@ -632,17 +636,7 @@ const playground = async () => {
         show_next: false,
     };
 
-    /**
-     * @param {App_Event} ev 
-     */
-    function handler(ev) {
-        if (ev.type === "change_week") {
-            state.show_next = ev.show_next;
-            content.replaceChildren(App(state, handler))
-        }
-    }
-
-    content.replaceChildren(App(state, handler));
+    content.replaceChildren(App(state));
 }
 
 playground()
