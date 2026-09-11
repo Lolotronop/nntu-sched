@@ -1,4 +1,6 @@
-const BASE_PATH = "https://my-api.nntu.ru"
+const IS_DEV = window.location.hostname === "localhost";
+
+const BASE_PATH = IS_DEV ? "http://localhost:3000" : "https://my-api.nntu.ru"
 const SCHEDULE_PATH = "/lesson-schedule/public/group-schedule"
 const GROUPS_PATH = "/lesson-schedule/public/groups"
 const GROUP_PARAMETER = "groupName"
@@ -42,6 +44,7 @@ function ok(data) {
  * @returns {Result_Error<E>}
  */
 function err(err) {
+    // console.error(err)
     return { err, ok: false }
 }
 
@@ -53,7 +56,13 @@ function err(err) {
  * @returns {Promise<Result<unknown>>}
  */
 async function fetch_json(uri) {
-    const req = await fetch(uri)
+    let req;
+    try {
+        req = await fetch(uri)
+    } catch (e) {
+        console.error("Failed to fetch", uri, e)
+        return err(`Failed to fetch json ${e}`)
+    }
     if (!req.ok) return err("Failed to fetch json")
     let data;
     try {
@@ -111,7 +120,7 @@ async function get_schedule_raw(group) {
 
 
 /**
- * @returns {Promise<Result<Groups_Response>>}
+ * @returns {Promise<Result<Groups_Response, string>>}
  */
 async function get_groups_raw() {
     return await fetch_json(`${BASE_PATH}${GROUPS_PATH}`)
@@ -179,43 +188,11 @@ function parse_time_slot(slots) {
  * @property {string} room
  * @property {string} type lecture/practice/lab/etc
  * @property {string|null} description
+ * @property {Time_Slot} time_slot
  * @property {number} time_slot_index
+ * @property {string} group
+ * @property {Date} date
 */
-
-/**
- * @param {Lesson_Element_Response} lesson_response 
- * @returns {Result<Lesson, string>}
- */
-function parse_lesson_from_response(lesson_response) {
-    /** @type {Lesson} */
-    const res = {}
-
-    if (lesson_response.subject !== null && lesson_response.subject.length > 0) { res.subject = lesson_response.subject }
-    else { return err("Failed to parse subject") }
-
-    if (lesson_response.teacher !== null && lesson_response.teacher.length > 0) {
-        res.teacher_full = lesson_response.teacher
-        res.teacher_short = null
-        const parts = lesson_response.teacher.split(" ")
-        if (parts.length === 3) {
-            const [last_name, first_name, third_name] = parts
-            res.teacher_short = `${last_name} ${first_name[0]}. ${third_name[0]}.`
-        }
-    } else { return err("Failed to parse teacher") }
-
-    if (lesson_response.room !== null && lesson_response.room.length > 0) { res.room = lesson_response.room.split(" ")[0] }
-    else { return err("Failed to parse room") }
-
-    if (lesson_response.studyType !== null && lesson_response.studyType.length > 0) { res.type = lesson_response.studyType }
-    else { return err("Failed to parse type") }
-
-    if (lesson_response.timeIndex) { res.time_slot_index = lesson_response.timeIndex - 1 }
-    else { return err("Failed to parse time slot") }
-
-    res.description = lesson_response.description
-
-    return ok(res)
-}
 
 
 const RU_MONTH_NAMES = {
@@ -274,19 +251,6 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
  * @property {Date} date
  * @property {Lesson[]} lessons
 */
-
-/**
- * @param {Day_Response} raw
- * @returns {Result<Day, string>}
- */
-function parse_day_from_response(raw) {
-    const lessons = raw.lessonElements.map(parse_lesson_from_response).filter(el => el.ok).map(el => el.data);
-    const date_res = parse_ru_date(raw.dayOfTheWeek);
-    if (!date_res.ok) return err(date_res.err);
-
-    return ok({ date: date_res.data, lessons });
-}
-
 
 /**
  * 
@@ -396,10 +360,9 @@ function TimeSlot(time_slot) {
 
 /**
  * @param {Lesson} lesson
- * @param {Time_Slot[]} time_slots
  * @returns {HTMLElement}
  */
-function LessonCard(lesson, time_slots) {
+function LessonCard(lesson) {
     /** @type {SVGElement} */
     let lesson_type_icon;
     let lesson_type_class = "unkonwn"
@@ -438,15 +401,18 @@ function LessonCard(lesson, time_slots) {
             el("span", { class: "muted", style: "min-width: 14px; display: flex; justify-content: end;" },
                 lesson.time_slot_index + 1
             ),
-            el("span", {}, lesson.subject),
-            lesson.description && el("span", { class: "muted" },
-                `(${lesson.description})`
-            )
+            el("span", {},
+                lesson.subject,
+                lesson.description ? el("span", { class: "muted" },
+                    `  (${lesson.description})`
+                ) : ""
+            ),
+
         ),
         el("div", { class: "flex-row gap-4" },
             with_icon(
                 ICONS.time_slot(14), {},
-                TimeSlot(time_slots[lesson.time_slot_index])
+                TimeSlot(lesson.time_slot)
             ),
 
             with_icon(
@@ -462,7 +428,7 @@ function LessonCard(lesson, time_slots) {
 
             with_icon(
                 ICONS.teacher(14), {},
-                el("span", { title: lesson.teacher_full }, lesson.teacher_short !== null ? lesson.teacher_short : lesson.teacher_full)
+                el("span", { title: lesson.teacher_full }, !!lesson.teacher_short && lesson.teacher_short.length > 0 ? lesson.teacher_short : lesson.teacher_full)
             ),
         ),
     );
@@ -507,12 +473,11 @@ function DayHeader(date, has_lessons) {
 
 /**
  * @param {Day} day
- * @param {Time_Slot[]} time_slots
  * @returns {HTMLElement}
  */
-function DayCard(day, time_slots) {
+function DayCard(day) {
     const header = DayHeader(day.date, day.lessons.length > 0)
-    const lesson_cards = day.lessons.map(l => LessonCard(l, time_slots))
+    const lesson_cards = day.lessons.map(l => LessonCard(l))
     return el("div", { class: "day" },
         header,
         ...lesson_cards
@@ -521,11 +486,10 @@ function DayCard(day, time_slots) {
 
 /**
  * @param {Day[]} day
- * @param {Time_Slot[]} time_slots
  * @returns {HTMLElement}
  */
-function Schedule(days, time_slots) {
-    const day_cards = days.map(el => DayCard(el, time_slots))
+function Schedule(days) {
+    const day_cards = days.map(el => DayCard(el))
     return el("div", { class: "schedule" }, ...day_cards)
 }
 
@@ -536,7 +500,6 @@ function Schedule(days, time_slots) {
  * @property {bool} show_next
  * @property {Day[]} current_week
  * @property {Day[]} next_week
- * @property {Time_Slot[]} time_slots
 */
 
 
@@ -595,48 +558,307 @@ function App(state) {
     return self;
 }
 
+/**
+ * @typedef Compressed_Lesson
+ * @type {object}
+ *
+ * @property {number} subject_id
+ * @property {number} teacher_id
+ * @property {number} room_id
+ * @property {number} type_id lecture/practice/lab/etc
+ * @property {number} time_slot_id
+ * @property {number} date_id
+ * @property {number} group_id
+ *
+ * @property {string|null} description
+*/
+
+/**
+ * @typedef Full_Schedule
+ * @type {object}
+ * @property {Compressed_Lesson[]} lessons
+ * @property {string[]} subjects
+ * @property {string[]} teachers
+ * @property {string[]} rooms
+ * @property {string[]} types
+ * @property {string[]} groups
+ * @property {Date[]} dates
+ * @property {Time_Slot[]} time_slots
+ */
+
+/**
+ * @param {{group: string, schedule_response: Schedule_Response}[]} groups
+ * @returns {Full_Schedule}
+ */
+function parse_full_schedule(groups) {
+
+    //============================
+    //=======local functions======
+    //============================
+
+    /**
+     * @param {Schedule_Response} schedule
+     * @returns 
+     */
+    const is_schedule_response_empty = (schedule) => {
+        return schedule.currentWeek.length === 0 &&
+            schedule.nextWeek.length === 0
+    }
+
+
+    /**
+     * While this function is not efficient at all
+     * it is more that fast enough for ~1000 elements
+     * that it is usually used on. And this step is
+     * only done once for the whole schedule, then cached
+     * so this is not a big deal
+     * @template T
+     * @param {T[]} arr
+     * @param {T} item
+     * @returns {number}
+     */
+    const find_or_create_element = (arr, item) => {
+        if (item === null || item === undefined) return -1;
+
+        if (typeof item === "string") {
+            item = item.trim();
+            if (item === "") return -1;
+        }
+
+        let eq = (a, b) => a === b;
+        if (item instanceof Date) {
+            eq = (a, b) => a.getTime() === b.getTime();
+        }
+        const index = arr.findIndex(el => eq(el, item));
+        if (index === -1) {
+            arr.push(item);
+            return arr.length - 1;
+        } else {
+            return index;
+        }
+    }
+
+
+    const is_lesson_empty = (lesson_element) => {
+        return lesson_element.startTime === null &&
+            lesson_element.endTime === null &&
+            lesson_element.subject === '' &&
+            lesson_element.studyType === '' &&
+            lesson_element.room === '' &&
+            lesson_element.teacher === '' &&
+            lesson_element.groupName === null &&
+            lesson_element.description === null
+    }
+
+    // these 2 are useful during debug
+    const lesson_has_empty_elements = (lesson_element) => {
+        return lesson_element.startTime === null ||
+            lesson_element.endTime === null ||
+            lesson_element.subject === '' ||
+            lesson_element.studyType === '' ||
+            lesson_element.room === '' ||
+            lesson_element.teacher === '' ||
+            lesson_element.groupName === null
+    }
+
+    const lesson_empty_elements = (lesson_element) => {
+        const empty = [];
+        if (lesson_element.startTime === null) empty.push("startTime");
+        if (lesson_element.endTime === null) empty.push("endTime");
+        if (lesson_element.subject === '') empty.push("subject");
+        if (lesson_element.studyType === '') empty.push("studyType");
+        if (lesson_element.room === '') empty.push("room");
+        if (lesson_element.teacher === '') empty.push("teacher");
+        if (lesson_element.groupName === null) empty.push("groupName");
+        return empty;
+    }
+
+
+
+    //============================
+    //=======main loop============
+    //============================
+
+    /** @type {Full_Schedule} */
+    let schedule = {
+        lessons: [],
+        subjects: [],
+        teachers: [],
+        rooms: [],
+        types: [],
+        groups: [],
+        dates: [],
+        time_slots: [],
+    };
+    for (const { group, schedule_response } of groups) {
+        if (is_schedule_response_empty(schedule_response)) {
+            continue;
+        }
+
+        schedule.time_slots = schedule_response.times.map(parse_time_slot).filter(el => el.ok).map(el => el.data)
+        if (schedule.time_slots.length !== 7) {
+            console.error("Failed to parse time slots for group", group);
+            continue;
+        }
+
+        const group_id = find_or_create_element(schedule.groups, group);
+
+        const days = [...schedule_response.currentWeek, ...schedule_response.nextWeek];
+        for (const { dayOfTheWeek, lessonElements } of days) {
+            const parsed_date = parse_ru_date(dayOfTheWeek);
+            if (!parsed_date.ok) {
+                console.error("Failed to parse date", dayOfTheWeek, "for group", group);
+                continue;
+            }
+
+            const date_id = find_or_create_element(schedule.dates, parsed_date.data);
+
+            for (const lesson_element of lessonElements) {
+                if (is_lesson_empty(lesson_element)) {
+                    continue;
+                }
+
+                schedule.lessons.push({
+                    group_id,
+                    date_id,
+                    time_slot_id: lesson_element.timeIndex - 1,
+                    subject_id: find_or_create_element(schedule.subjects, lesson_element.subject),
+                    teacher_id: find_or_create_element(schedule.teachers, lesson_element.teacher),
+                    room_id: find_or_create_element(schedule.rooms, lesson_element.room),
+                    type_id: find_or_create_element(schedule.types, lesson_element.studyType),
+                });
+            }
+        }
+    }
+
+    return schedule;
+}
+
+async function get_all_groups_schedule_raw() {
+    /** @type {{group: string, schedule_response: Schedule_Response}[]} */
+    let all_schedules = [];
+
+    const groups = await get_groups_raw();
+    if (!groups.ok) {
+        console.error("Failed to get groups")
+        return err("Failed to get groups")
+    }
+
+    // TODO: throttle this
+    const promises = [];
+    for (const group of groups.data) {
+        promises.push(get_schedule_raw(group).then(result => ({ result, group })))
+    }
+    const results = await Promise.all(promises)
+    for (const { result, group } of results) {
+        if (!result.ok) {
+            console.error("Failed to get schedule for group", result.err)
+            continue;
+        }
+        all_schedules.push({ group, schedule_response: result.data })
+    }
+
+    return ok(all_schedules);
+}
 
 
 const playground = async () => {
-    const group = "М26-ИСТ-3"
-    const schedule_raw = await get_schedule_raw(group)
-
-    if (!schedule_raw.ok) {
-        console.error("get_schedule_raw failed")
-        return
+    /** @type {Full_Schedule} */
+    let schedule = JSON.parse(localStorage.getItem("schedule"));
+    if (schedule) {
+        for (let i = 0; i < schedule.dates.length; i++) {
+            const date_str = schedule.dates[i];
+            schedule.dates[i] = new Date(date_str);
+        }
+    }
+    if (!schedule) {
+        const all_schedules_result = await get_all_groups_schedule_raw();
+        if (!all_schedules_result.ok) {
+            console.error("Failed to get all schedules", all_schedules_result.err)
+            return;
+        }
+        schedule = parse_full_schedule(all_schedules_result.data);
+        try {
+            localStorage.setItem("schedule", JSON.stringify(schedule));
+        } catch (e) {
+            console.error("Failed to save to localStorage", e)
+            return;
+        }
     }
 
-    const time_slots_raw = schedule_raw.data.times
-    // remove the first "title" element
-    time_slots_raw.shift()
-    console.assert(time_slots_raw.length === 7)
+    // const group = "М26-ИСТ-3"
+    const group = "23-АМ";
 
-    const time_slots_results = time_slots_raw
-        .map(parse_time_slot)
-
-    if (time_slots_raw.length != time_slots_raw.length) {
-        console.error("Not all time_slots were succesfully parsed", time_slots_results)
+    const group_id = schedule.groups.findIndex(el => el === group);
+    if (group_id === -1) {
+        console.error(`Failed to find group ${group}`)
+        return;
     }
 
-    const time_slots = time_slots_results
-        .filter(el => el.ok)
-        .map(el => el.data)
+    /** @type {Lesson[]} */
+    let lessons = [];
 
+    for (const compressed_lesson of schedule.lessons) {
+        if (compressed_lesson.group_id !== group_id) {
+            continue;
+        }
 
-    const content = document.querySelector("#content");
+        /** @type {Lesson} */
+        const lesson = {
+            group: schedule.groups[compressed_lesson.group_id],
+            date: schedule.dates[compressed_lesson.date_id],
+            time_slot: schedule.time_slots[compressed_lesson.time_slot_id],
+            time_slot_index: compressed_lesson.time_slot_id,
+            subject: schedule.subjects[compressed_lesson.subject_id],
+            teacher_full: schedule.teachers[compressed_lesson.teacher_id],
+            room: schedule.rooms[compressed_lesson.room_id],
+            type: schedule.types[compressed_lesson.type_id],
+            description: compressed_lesson.description,
+        }
+        lessons.push(lesson);
+    }
 
-    const current_week = schedule_raw.data.currentWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data);
-    const next_week = schedule_raw.data.nextWeek.map(parse_day_from_response).filter(el => el.ok).map(el => el.data)
+    const this_week_dates = schedule.dates.slice(0, 6);
+    const next_week_dates = schedule.dates.slice(6, 12);
 
-    /** @var {App_State} */
-    const state = {
-        current_week,
-        next_week,
-        time_slots,
-        show_next: false,
-    };
+    /** @type {Day[]} */
+    const current_week = this_week_dates.map(date => ({ date, lessons: [] }));
+    /** @type {Day[]} */
+    const next_week = next_week_dates.map(date => ({ date, lessons: [] }));
 
-    content.replaceChildren(App(state));
+    for (const lesson of lessons) {
+        let date_index;
+        date_index = this_week_dates.findIndex(el => el.getTime() === lesson.date.getTime());
+        if (date_index !== -1) {
+            current_week[date_index].lessons.push(lesson);
+            continue;
+        }
+
+        date_index = next_week_dates.findIndex(el => el.getTime() === lesson.date.getTime());
+        if (date_index !== -1) {
+            next_week[date_index].lessons.push(lesson);
+            continue;
+        }
+
+        console.error("Failed to find date", lesson.date);
+    }
+
+    document.onreadystatechange = () => {
+        if (document.readyState === "complete") {
+            const content = document.querySelector("#content");
+            console.log(content);
+
+            /** @type {App_State} */
+            const state = {
+                current_week,
+                next_week,
+                show_next: false,
+            };
+
+            content.replaceChildren(App(state));
+        }
+    }
+
 }
 
 playground()
