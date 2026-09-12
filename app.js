@@ -909,11 +909,13 @@ const playground = async () => {
         const content = document.querySelector("#content");
         content.prepend(loaing_bar);
 
-        const groups = await get_groups_raw();
+        let groups = await get_groups_raw();
         if (!groups.ok) {
             console.error("Failed to get groups")
             return err("Failed to get groups")
         }
+
+        groups.data = groups.data.slice(groups.data.length / 2, groups.data.length - 1);
 
         const all_schedules_result = await get_all_groups_schedule_raw(groups.data, (count) => {
             const percent = Math.round(count / groups.data.length * 100);
@@ -947,6 +949,7 @@ const playground = async () => {
         app_el.replaceWith(App(app_state));
     } else {
         app_el = App(app_state);
+        content.append(app_el);
     }
 }
 
