@@ -26,10 +26,16 @@ body {
 body {
     width: 100%;
     min-height: 100dvh;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
 }
 
 #content {
-    width: 100%;
+    max-width: 100%;
+    width: 620px;
 
     padding: 1em;
 
@@ -51,8 +57,7 @@ body {
 .day {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    max-width: 100%;
-    width: 620px;
+    width: 100%;
 
     display: flex;
     flex-direction: column;
