@@ -11,7 +11,7 @@ const SCHEDULE_CACHE_VERSION = 1;
 const DAY = 1000 * 60 * 60 * 24;
 const MINUTE = 1000 * 60;
 
-const SCHEDULE_CACHE_TIMEOUT = IS_DEV ? DAY : MINUTE;
+const SCHEDULE_CACHE_TIMEOUT = IS_DEV ? MINUTE : DAY;
 
 /**
  * @template T
