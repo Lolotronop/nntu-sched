@@ -25,19 +25,19 @@ self.addEventListener("activate", (event) => {
     );
 })
 
+const APP_ROUTES =
+    [
+        "/",
+        "/index.html",
+        "/app.js",
+        "/style.css",
+        "/modern-normalize.css",
+    ];
+
 self.addEventListener("install", (event) => {
     event.waitUntil(
         caches.open(CURRENT_CACHES.app).then(cache => {
-            cache.addAll(
-                [
-                    "/",
-                    "/index.html",
-                    "/app.js",
-                    "/sw.js",
-                    "/style.css",
-                    "/modern-normalize.css",
-                ]
-            )
+            return cache.addAll(APP_ROUTES)
         })
     )
 })
@@ -46,16 +46,19 @@ self.addEventListener("fetch", (event) => {
     console.log("Handling fetch event for", event.request.url);
 
     event.respondWith(
-        caches
-            .open(CURRENT_CACHES.app)
-            .then((cache) => cache.match(event.request))
-            .then((response) => {
-                if (response) return response;
-                else return fetch(event.request);
-            })
-            .catch((error) => {
-                console.error("  Error in fetch handler:", error);
-                throw error;
-            }),
+        caches.open(CURRENT_CACHES.app).then(async (cache) => {
+            const cached = await cache.match(event.request);
+
+            const networkFetch = fetch(event.request)
+                .then((response) => {
+                    if (response.ok && APP_ROUTES.includes(url.pathname)) {
+                        cache.put(event.request, response.clone());
+                    }
+
+                    return response;
+                });
+
+            return cached || networkFetch;
+        })
     );
 });
