@@ -35,7 +35,7 @@ self.addEventListener("install", (event) => {
                     "/app.js",
                     "/sw.js",
                     "/style.css",
-                    "/modern-reset.css",
+                    "/modern-normalize.css",
                 ]
             )
         })

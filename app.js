@@ -943,7 +943,11 @@ const playground = async () => {
     if (!schedule) return;
 
     app_state.schedule = schedule;
-    app_el.replaceWith(App(app_state));
+    if (app_el) {
+        app_el.replaceWith(App(app_state));
+    } else {
+        app_el = App(app_state);
+    }
 }
 
 
