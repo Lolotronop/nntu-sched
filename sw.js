@@ -51,7 +51,7 @@ self.addEventListener("fetch", (event) => {
             .then((cache) => cache.match(event.request))
             .then((response) => {
                 if (response) return response;
-                else return fetch(request);
+                else return fetch(event.request);
             })
             .catch((error) => {
                 console.error("  Error in fetch handler:", error);
