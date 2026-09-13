@@ -26,7 +26,7 @@ function connect() {
     if (evt) {
         evt.close();
     }
-    evt = new EventSource("reload");
+    evt = new EventSource("/reload");
     evt.onmessage = handle_message;
     evt.onerror = handle_error;
 }

@@ -11,7 +11,7 @@ const SCHEDULE_CACHE_VERSION = 1;
 const DAY = 1000 * 60 * 60 * 24;
 const MINUTE = 1000 * 60;
 
-const SCHEDULE_CACHE_TIMEOUT = IS_DEV ? MINUTE : DAY;
+const SCHEDULE_CACHE_TIMEOUT = IS_DEV ? DAY : DAY;
 
 /**
  * @template T
@@ -543,6 +543,17 @@ function el(type, options, ...children) {
 }
 
 /**
+ * 
+ * @param {HTMLElement} old_el
+ * @param {HTMLElement} new_el
+ * @returns HTMLElement
+ */
+function replace(old_el, new_el) {
+    old_el.replaceWith(new_el);
+    return new_el;
+}
+
+/**
  * @param {Time_Of_Day} time_of_day
  * @returns {string}
  */
@@ -580,7 +591,7 @@ function TimeSlot(time_slot) {
 function LessonCard(lesson) {
     /** @type {SVGElement} */
     let lesson_type_icon;
-    let lesson_type_class = "unkonwn"
+    let lesson_type_class = "unknown"
 
     // TODO: make this less string-dpeendant
     if (lesson.type === "практ.") {
@@ -593,7 +604,7 @@ function LessonCard(lesson) {
         lesson_type_icon = ICONS.lab(14);
         lesson_type_class = "lab";
     } else {
-        lesson_type_icon = ICONS.unkonwn(14);
+        lesson_type_icon = ICONS.unknown(14);
         lesson_type_class = "unkonwn";
     }
 
@@ -713,6 +724,7 @@ function Schedule(days) {
  * @typedef App_State
  * @type {object}
  * @property {Full_Schedule} schedule
+ * @property {string} selected_group
  * @property {bool} show_next
 */
 
@@ -748,14 +760,13 @@ function LoadingBar() {
  * @returns {HTMLElement}
  */
 function App(state) {
-    const group = "М26-ИСТ-3"
-    // const group = "23-АМ";
+    const group = state.selected_group;
 
     const schedule = state.schedule;
     const group_id = schedule.groups.findIndex(el => el === group);
     if (group_id === -1) {
         console.error(`Failed to find group ${group}`)
-        return;
+        return el("div", {}, "Failed to find group");
     }
 
     /** @type {Lesson[]} */
@@ -816,12 +827,10 @@ function App(state) {
     const handle_change = (updated_show_next) => {
         state.show_next = updated_show_next;
         const new_week_el = state.show_next ? next_week_el : current_week_el;
-        selected_week_el.replaceWith(new_week_el)
-        selected_week_el = new_week_el;
+        selected_week_el = replace(selected_week_el, new_week_el);
 
         const new_buttons_el = SelectorButtons(state.show_next, handle_change)
-        buttons_el.replaceWith(new_buttons_el)
-        buttons_el = new_buttons_el;
+        buttons_el = replace(buttons_el, new_buttons_el);
     }
 
     let buttons_el = SelectorButtons(state.show_next, handle_change);
@@ -877,8 +886,20 @@ const playground = async () => {
     let should_update = true;
 
     /** @type {App_State} */
-    let app_state = { schedule, show_next: false };
+    let app_state = { schedule, show_next: false, selected_group: "М26-ИСТ-3" };
     let app_el;
+
+
+
+    const url = new URL(window.location.href);
+    if (url.pathname.startsWith("/group/")) {
+        let group = url.pathname.slice("/group/".length);
+        group = decodeURIComponent(group);
+        app_state.selected_group = group;
+        if (!window.history.state || window.history.state.group !== group) {
+            window.history.pushState({ group }, group, url.pathname);
+        }
+    }
 
     if (schedule_key) {
         try {
@@ -943,13 +964,119 @@ const playground = async () => {
 
     if (!schedule) return;
 
+
+    const search_groups = [];
+    for (const group of schedule.groups) {
+        search_groups.push(group.toLowerCase().replace(/-/g, ""));
+    }
+
+    /** @param {InputEvent} e  */
+    const handle_search_input = (e) => {
+        /** @type {HTMLInputElement} */
+        const target = e.target;
+        const search = target.value.toLowerCase().replace(/-/g, "");
+        const results_el = target.parentElement.querySelector(".results");
+        results_el.innerHTML = "";
+
+        if (search.length < 1) {
+            results_el.classList.add("hidden");
+            return;
+        }
+        let matches = 0;
+        for (let i = 0; i < search_groups.length; i++) {
+            const group_search = search_groups[i];
+            if (group_search.includes(search)) {
+                const group = schedule.groups[i];
+                const group_el = el("button", { class: "result", onclick: handle_group_click, onkeydown: handle_search_key }, group);
+                results_el.append(group_el);
+                matches++;
+            }
+        }
+        if (matches === 0) {
+            results_el.classList.add("hidden");
+        } else {
+            results_el.classList.remove("hidden");
+        }
+    }
+
+    /** @param {KeyboardEvent} e  */
+    const handle_search_key = (e) => {
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const results_el = search_el.querySelector(".results");
+            const children = results_el.children;
+            if (children.length === 0) return;
+            const focused = results_el.querySelector(":focus");
+            if (!focused) {
+                children[0].focus();
+            } else {
+                const next = e.key === "ArrowDown" ? focused.nextElementSibling : focused.previousElementSibling;
+                if (next) {
+                    next.focus();
+                }
+            }
+        }
+
+        if (e.key === "Enter") {
+            if (e.target.tagName === "INPUT") {
+                e.preventDefault();
+                const results_el = search_el.querySelector(".results");
+                const search_input = e.target;
+                const focused = results_el.querySelector(":focus");
+                if (focused) {
+                    focused.click();
+                } else {
+                    results_el.children[0].click();
+                }
+                search_input.blur();
+            }
+        }
+    }
+
+    /** @type {HTMLButtonElement["onclick"]}*/
+    function handle_group_click(e) {
+        /** @type {HTMLButtonElement} */
+        const target = e.target;
+        const group = target.innerText;
+        app_state.selected_group = group;
+        app_el = replace(app_el, App(app_state));
+
+        // this does not clear the search results,
+        // but I kinda like that behavior
+        search_el.querySelector("input").value = group;
+        target.blur();
+
+        const last_state = window.history.state;
+        if (!last_state || last_state && last_state.group !== group) {
+            window.history.pushState({ group }, group, `/group/${group}`);
+        }
+    }
+
+    const search_el = el("div", { class: "search", style: "margin-bottom: 1em;" },
+        el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key }),
+        el("div", { class: "results" })
+    );
+
+    search_el.querySelector("input").value = app_state.selected_group;
+
+    content.prepend(search_el);
+
     app_state.schedule = schedule;
     if (app_el) {
-        app_el.replaceWith(App(app_state));
+        app_el = replace(app_el, App(app_state));
     } else {
         app_el = App(app_state);
         content.append(app_el);
     }
+
+    window.addEventListener("popstate", (event) => {
+        if (!event.state) return;
+        console.log("popstate", event.state);
+        const group = event.state.group;
+        app_state.selected_group = group;
+        app_el = replace(app_el, App(app_state));
+        search_el.querySelector("input").value = group;
+    });
 }
 
 
