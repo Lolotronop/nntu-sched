@@ -322,7 +322,6 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
  * @returns {Full_Schedule}
  */
 function parse_full_schedule(groups) {
-
     //============================
     //=======local functions======
     //============================
