@@ -720,12 +720,40 @@ function Schedule(days) {
     return el("div", { class: "schedule" }, ...day_cards)
 }
 
+/**
+ * @typedef Schedule_Filter
+ * @type {object}
+ * @property {"group"} by
+ * @property {string} value
+ */
+
+/**
+ * @param {string} pathname
+ * @returns {Schedule_Filter|null}
+ */
+function schedule_filter_from_pathname(pathname) {
+    const parts = pathname.split("/");
+    if (parts.length < 2) return null;
+    while (parts[0] === "") { parts.shift(); }
+    const [by, value_str] = parts;
+    if (by !== "group") return null;
+    const value = decodeURIComponent(value_str);
+    return { by, value };
+}
+
+/**
+ * @param {Schedule_Filter} filter
+ * @returns {string}
+ */
+function schedule_filter_to_pathname(filter) {
+    return `/${filter.by}/${encodeURIComponent(filter.value)}`;
+}
 
 /**
  * @typedef App_State
  * @type {object}
  * @property {Full_Schedule} schedule
- * @property {string} selected_group
+ * @property {Schedule_Filter|null} filter
  * @property {bool} show_next
 */
 
@@ -761,7 +789,7 @@ function LoadingBar() {
  * @returns {HTMLElement}
  */
 function App(state) {
-    const group = state.selected_group;
+    const group = state.filter?.value;
 
     const schedule = state.schedule;
     const group_id = schedule.groups.findIndex(el => el === group);
@@ -909,85 +937,162 @@ function App(state) {
     return self;
 }
 
+/**
+ * @typedef Cache_Entry
+ * @type {object}
+ * @property {string} key
+ * @property {number} version
+ * @property {Date} date
+ */
 
-const playground = async () => {
-    const content = document.querySelector("#content");
 
-    /** @type {{key: string, date: Date}[]} */
-    const found_keys = [];
+const CACHE_SEPARATOR = "-";
+/**
+ * @param {Cache_Entry} entry
+ * @returns {string}
+ */
+function cache_entry_to_string(entry) {
+    return `${entry.key}${CACHE_SEPARATOR}${entry.version}${CACHE_SEPARATOR}${entry.date.getTime()}`;
+}
+
+/**
+ * @param {string} str
+ * @returns {Cache_Entry|null}
+ */
+function cache_entry_from_string(str) {
+    const parts = str.split(CACHE_SEPARATOR);
+    if (parts.length !== 3) return null;
+    let [key, version_str, date_str] = parts;
+    const version = +version_str;
+    if (isNaN(version)) return null;
+    const date = new Date(+date_str);
+    if (isNaN(date.getTime())) return null;
+    return { key, version, date };
+}
+
+/**
+ * @param {string} key
+ * @param {number} version
+ * @returns {Cache_Entry[]} sorted by date, newest first
+ */
+function cache_find_entries(key, version) {
+    /** @type {Cache_Entry[]} */
+    const entries = [];
     for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key.startsWith("schedule-")) continue;
-        if (!key.startsWith(`schedule-${SCHEDULE_CACHE_VERSION}`)) {
-            console.warn("Cached schedule version is not supported, deleting", key);
-            localStorage.removeItem(key);
+        const entry_str = localStorage.key(i);
+        const entry = cache_entry_from_string(entry_str);
+        if (!entry) continue;
+        if (entry.key !== key) continue;
+        if (entry.version !== version) {
+            console.warn(`Cache key ${entry_str} version does not match current ${version}, deleting`);
+            localStorage.removeItem(entry_str);
             continue;
         }
-
-        let date;
-        try {
-            const date_str = key.slice(`schedule-${SCHEDULE_CACHE_VERSION}-`.length);
-            date = new Date(+date_str);
-        } catch (e) {
-            console.warn("Failed to parse schedule date, deleting", key);
-            localStorage.removeItem(key);
-            continue;
-        }
-
-        found_keys.push({ key, date });
+        entries.push(entry);
     }
 
-    found_keys.sort((a, b) => {
+    entries.sort((a, b) => {
         return a.date.getTime() - b.date.getTime();
     })
+    return entries;
+}
 
-    let schedule_key = found_keys.shift();
 
-    for (const key of found_keys) {
+/**
+ * @param {string} json
+ * @returns {Full_Schedule|null}
+ */
+function schedule_from_json(json) {
+    /** @type {Full_Schedule} */
+    let schedule;
+    try {
+        schedule = JSON.parse(json)
+    } catch (e) {
+        console.error("Failed to parse schedule", e);
+        return null;
+    }
+
+
+    for (let i = 0; i < schedule.dates.length; i++) {
+        const date_str = schedule.dates[i];
+        schedule.dates[i] = new Date(date_str);
+    }
+
+    return schedule;
+}
+
+/**
+ * @returns {{schedule: Full_Schedule, entry: Cache_Entry}|null}
+ */
+function cache_load_schedule() {
+    const cache_entries = cache_find_entries("schedule", SCHEDULE_CACHE_VERSION);
+    if (cache_entries.length === 0) return null;
+    let entry = cache_entries.shift();
+    if (!entry) return null;
+
+    // the cache entries are pretty big
+    // so we can afford to store only the latest
+    // in the lcoalStorage. Cache would peobably
+    // hold more, but I don't know how to do that
+    for (const key of cache_entries) {
         localStorage.removeItem(key);
     }
 
-    /** @type {Full_Schedule} */
-    let schedule;
-    let should_update = true;
+    const schedule_key = cache_entry_to_string(entry);
+    const json = localStorage.getItem(schedule_key);
+    if (!json) return null;
 
+    const schedule = schedule_from_json(json);
+    if (!schedule) return null;
+
+    return { schedule, entry };
+}
+
+/**
+ * @typedef History_State
+ * @type {object}
+ * @property {Schedule_Filter|null} filter
+ */
+
+/**
+ * @param {Schedule_Filter} filter
+ */
+function history_push_state(filter) {
+    /** @type {History_State|undefined} */
+    const state = window.history.state;
+    if (state?.filter === filter) return;
+    window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
+}
+
+async function main() {
+    const content = document.querySelector("#content");
     /** @type {App_State} */
-    let app_state = { schedule, show_next: false, selected_group: "М26-ИСТ-3" };
+    let app_state = { schedule: null, show_next: false, selected_group: null };
+    /** @type {HTMLElement} */
     let app_el;
 
-
-
-    const url = new URL(window.location.href);
-    if (url.pathname.startsWith("/group/")) {
-        let group = url.pathname.slice("/group/".length);
-        group = decodeURIComponent(group);
-        app_state.selected_group = group;
-        if (!window.history.state || window.history.state.group !== group) {
-            window.history.pushState({ group }, group, url.pathname);
-        }
+    app_state.filter = schedule_filter_from_pathname(window.location.pathname);
+    if (app_state.filter) {
+        history_push_state(app_state.filter);
     }
 
-    if (schedule_key) {
-        try {
-            schedule = JSON.parse(localStorage.getItem(schedule_key.key));
-            for (let i = 0; i < schedule.dates.length; i++) {
-                const date_str = schedule.dates[i];
-                schedule.dates[i] = new Date(date_str);
-            }
-            const now = new Date();
-            const time_since_update = now.getTime() - schedule_key.date.getTime();
-            should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
-            app_state.schedule = schedule;
-            app_el = App(app_state);
-            content.append(app_el);
-        } catch (e) {
-            console.error("Failed to parse schedule", e);
-            localStorage.removeItem(schedule_key.key);
-            schedule_key = null;
-        }
+    if (!app_state.filter) {
+        app_state.filter = { by: "group", value: "М26-ИСТ-3" };
     }
 
-    if (!schedule || should_update) {
+
+    const cache = cache_load_schedule();
+    if (cache) {
+        app_state.schedule = cache.schedule;
+        app_el = App(app_state);
+        content.append(app_el);
+    }
+
+    const now = new Date();
+    const time_since_update = now.getTime() - cache.entry.date.getTime();
+    let should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
+
+    if (!cache.schedule || should_update) {
         const loaing_bar = LoadingBar();
         const loading_bar_inner = loaing_bar.querySelector(".loading-bar-inner");
 
@@ -1012,14 +1117,14 @@ const playground = async () => {
             console.error("Failed to get all schedules", all_schedules_result.err)
         }
 
-        schedule = parse_full_schedule(all_schedules_result.data);
+        app_state.schedule = parse_full_schedule(all_schedules_result.data);
 
         const date_str = new Date().getTime();
         const key = `schedule-${SCHEDULE_CACHE_VERSION}-${date_str}`;
         try {
-            localStorage.setItem(key, JSON.stringify(schedule));
-            if (schedule_key) {
-                localStorage.removeItem(schedule_key.key);
+            localStorage.setItem(key, JSON.stringify(app_state.schedule));
+            if (schedule_cache_entry) {
+                localStorage.removeItem(schedule_cache_entry.key);
             }
         } catch (e) {
             console.error("Failed to save to localStorage", e)
@@ -1028,11 +1133,9 @@ const playground = async () => {
         loaing_bar.remove();
     }
 
-    if (!schedule) return;
-
 
     const search_groups = [];
-    for (const group of schedule.groups) {
+    for (const group of app_state.schedule.groups) {
         search_groups.push(group.toLowerCase().replace(/-/g, ""));
     }
 
@@ -1052,7 +1155,7 @@ const playground = async () => {
         for (let i = 0; i < search_groups.length; i++) {
             const group_search = search_groups[i];
             if (group_search.includes(search)) {
-                const group = schedule.groups[i];
+                const group = app_state.schedule.groups[i];
                 const group_el = el("button", { class: "result", onclick: handle_group_click, onkeydown: handle_search_key }, group);
                 results_el.append(group_el);
                 matches++;
@@ -1104,7 +1207,7 @@ const playground = async () => {
         /** @type {HTMLButtonElement} */
         const target = e.target;
         const group = target.innerText;
-        app_state.selected_group = group;
+        app_state.filter.value = group;
         app_el = replace(app_el, App(app_state));
 
         // this does not clear the search results,
@@ -1112,10 +1215,7 @@ const playground = async () => {
         search_el.querySelector("input").value = group;
         target.blur();
 
-        const last_state = window.history.state;
-        if (!last_state || last_state && last_state.group !== group) {
-            window.history.pushState({ group }, group, `/group/${group}`);
-        }
+        history_push_state({ by: "group", value: group });
     }
 
     const search_el = el("div", { class: "search", style: "margin-bottom: 1em;" },
@@ -1123,11 +1223,12 @@ const playground = async () => {
         el("div", { class: "results" })
     );
 
-    search_el.querySelector("input").value = app_state.selected_group;
+    if (app_state.filter) {
+        search_el.querySelector("input").value = app_state.filter.value;
+    }
 
     content.prepend(search_el);
 
-    app_state.schedule = schedule;
     if (app_el) {
         app_el = replace(app_el, App(app_state));
     } else {
@@ -1137,9 +1238,7 @@ const playground = async () => {
 
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
-        console.log("popstate", event.state);
         const group = event.state.group;
-        app_state.selected_group = group;
         app_el = replace(app_el, App(app_state));
         search_el.querySelector("input").value = group;
     });
@@ -1148,6 +1247,6 @@ const playground = async () => {
 
 document.onreadystatechange = () => {
     if (document.readyState === "complete") {
-        playground()
+        main()
     }
 }
