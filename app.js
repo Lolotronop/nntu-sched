@@ -529,20 +529,16 @@ const ICONS = {
 };
 
 /**
- * @param {string} type
- * @param {object} options
- * @param {(HTMLElement|string)[]} children
- * @returns HTMLElement
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} type
+ * @param {Partial<Omit<HTMLElementTagNameMap[K], "style">> & { class?: string, style?: string }} options
+ * @param {(Node|string)[]} children
+ * @returns {HTMLElementTagNameMap[K]}
  */
 function el(type, options, ...children) {
     const el = document.createElement(type)
-    for (let [key, value] of Object.entries(options)) {
-        if (key.startsWith("on")) {
-            el.addEventListener(key.slice(2), value)
-        } else {
-            el.setAttribute(key, value)
-        }
-    }
+    if (options.class) el.className = options.class;
+    Object.assign(el, options);
     el.append(...children)
     return el
 }
@@ -1077,6 +1073,7 @@ function history_push_state(filter) {
 async function main() {
     const content = document.querySelector("#content");
     if (!content) return;
+
     /** @type {App_State} */
     let app_state = { schedule: null, show_next: false, filter: null };
     /** @type {HTMLElement | undefined} */
@@ -1166,7 +1163,7 @@ async function main() {
         search_groups.push(group.toLowerCase().replace(/-/g, ""));
     }
 
-    /** @param {InputEvent} e  */
+    /** @param {InputEvent|FocusEvent} e  */
     const handle_search_input = (e) => {
         /** @type {HTMLInputElement} */
         //@ts-ignore
