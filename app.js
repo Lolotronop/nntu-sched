@@ -223,6 +223,7 @@ function parse_time_slot(slots) {
  * @property {string} teacher_full
  * @property {string|null} teacher_short
  * @property {string} room
+ * @property {string|null} room_short
  * @property {string} type lecture/practice/lab/etc
  * @property {string|null} description
  * @property {Time_Slot} time_slot
@@ -649,7 +650,7 @@ function LessonCard(lesson) {
         el("div", { class: "flex-row gap-4" },
             with_icon(
                 ICONS.room(14), {},
-                el("span", {}, lesson.room),
+                el("span", {}, lesson.room_short || lesson.room),
             ),
 
             with_icon(
@@ -772,9 +773,72 @@ function App(state) {
     /** @type {Lesson[]} */
     let lessons = [];
 
+    /** @type Record<string, string> */
+    const short_teachers = {};
+    /**
+     * @param {string} input
+     * @returns {string|null}
+     */
+    function shorten_teacher(input) {
+        if (input.length === 0) return null;
+        const parts = input.split(" ")
+        if (parts.length !== 3) return null;
+        const [surname, name, grandname] = parts;
+        if (surname.length === 0 || name.length === 0 || grandname.length === 0) {
+            return null;
+        }
+        if (surname.includes(".") || name.includes(".") || grandname.includes(".")) {
+            return null;
+        }
+        return `${surname} ${name[0]}. ${grandname[0]}.`
+    }
+
+    /** @type Record<string, string> */
+    const short_rooms = {};
+    /**
+     * TODO: maybe store rooms as an object
+     * with parsed fields like campus, remote, etc
+     * this way I will be able to show different icons
+     * for this more reliably for example
+     * @param {string} input
+     * @returns {string|null}
+     */
+    function shorten_room(input) {
+        if (input.length === 0) return null;
+        const common_regex = /\d\d\d\d \(Уч\. корп\. .\d/;
+        if (common_regex.test(input)) {
+            return input.slice(0, 4);
+        }
+
+        const less_common_regex = /\d\d\d\d-\d \(Уч\. корп\. .\d/;
+        if (less_common_regex.test(input)) {
+            return input.slice(0, 6);
+        }
+
+        if (input === "Дистанционный формат") {
+            return "Дистант";
+        }
+    }
+
     for (const compressed_lesson of schedule.lessons) {
         if (compressed_lesson.group_id !== group_id) {
             continue;
+        }
+
+        let room_short = short_rooms[compressed_lesson.room_id];
+        if (!room_short) {
+            room_short = shorten_room(schedule.rooms[compressed_lesson.room_id]);
+            if (room_short) {
+                short_rooms[compressed_lesson.room_id] = room_short;
+            }
+        }
+
+        let teacher_short = short_teachers[compressed_lesson.teacher_id];
+        if (!teacher_short) {
+            teacher_short = shorten_teacher(schedule.teachers[compressed_lesson.teacher_id]);
+            if (teacher_short) {
+                short_teachers[compressed_lesson.teacher_id] = teacher_short;
+            }
         }
 
         /** @type {Lesson} */
@@ -785,7 +849,9 @@ function App(state) {
             time_slot_index: compressed_lesson.time_slot_id,
             subject: schedule.subjects[compressed_lesson.subject_id],
             teacher_full: schedule.teachers[compressed_lesson.teacher_id],
+            teacher_short,
             room: schedule.rooms[compressed_lesson.room_id],
+            room_short,
             type: schedule.types[compressed_lesson.type_id],
             description: compressed_lesson.description,
         }
