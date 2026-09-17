@@ -1,3 +1,4 @@
+// @ts-check
 const IS_DEV = window.location.hostname === "localhost";
 
 const BASE_PATH = IS_DEV ? "http://localhost:3000" : "https://my-api.nntu.ru";
@@ -60,7 +61,7 @@ function err(err) {
 
 /**
  * @param {string} uri
- * @returns {Promise<Result<unknown>>}
+ * @returns {Promise<Result<unknown, string>>}
  */
 async function fetch_json(uri) {
     let req;
@@ -115,9 +116,10 @@ async function fetch_json(uri) {
  * @param {string} group
  * @returns {Promise<Result<Schedule_Response, string>>}
  */
-async function get_schedule_raw(group) {
+function get_schedule_raw(group) {
     const group_param = encodeURIComponent(group)
-    return await fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}`)
+    // @ts-ignore
+    return fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}`)
 }
 
 /**
@@ -129,8 +131,9 @@ async function get_schedule_raw(group) {
 /**
  * @returns {Promise<Result<Groups_Response, string>>}
  */
-async function get_groups_raw() {
-    return await fetch_json(`${BASE_PATH}${GROUPS_PATH}`)
+function get_groups_raw() {
+    // @ts-ignore
+    return fetch_json(`${BASE_PATH}${GROUPS_PATH}`)
 }
 
 
@@ -209,7 +212,8 @@ function parse_time_slot(slots) {
     const start_res = parse_hhmm_string_to_time_of_day(parts[0])
     const end_res = parse_hhmm_string_to_time_of_day(parts[1])
 
-    if (!start_res.ok || !end_res.ok) return err(`Parse of start or end failed. start: ${start_res.err} or end: ${start_res.err}`)
+    if (!start_res.ok) return err(`Failed to parse start time: ${start_res.err}`)
+    if (!end_res.ok) return err(`Failed to parse end time: ${end_res.err}`)
 
     return ok({ start: start_res.data, end: end_res.data })
 }
@@ -258,7 +262,7 @@ const RU_MONTH_NAMES = {
 /**
  * @param {string} str
  * @param {number} year
- * @returns {Result<Date, string}
+ * @returns {Result<Date, string>}
  */
 function parse_ru_date(str, year = new Date().getFullYear()) {
     const match = str
@@ -270,7 +274,12 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
     }
 
     const day = Number(match[1]);
-    const month = RU_MONTH_NAMES[match[2]];
+    const month_name = match[2];
+    if (month_name in Object.keys(RU_MONTH_NAMES)) {
+        return err("Invalid month");
+    }
+    // @ts-ignore
+    const month = RU_MONTH_NAMES[month_name];
 
     if (month === undefined) {
         return err("Invalid month");
@@ -352,10 +361,13 @@ function parse_full_schedule(groups) {
         if (item === null || item === undefined) return -1;
 
         if (typeof item === "string") {
+            // @ts-ignore
             item = item.trim();
             if (item === "") return -1;
         }
 
+        /** @param {any} a
+         @param {any} b */
         let eq = (a, b) => a === b;
         if (item instanceof Date) {
             eq = (a, b) => a.getTime() === b.getTime();
@@ -370,6 +382,7 @@ function parse_full_schedule(groups) {
     }
 
 
+    /** @param {Lesson_Element_Response} lesson_element */
     const is_lesson_empty = (lesson_element) => {
         return lesson_element.startTime === null &&
             lesson_element.endTime === null &&
@@ -382,6 +395,8 @@ function parse_full_schedule(groups) {
     }
 
     // these 2 are useful during debug
+
+    /** @param {Lesson_Element_Response} lesson_element */
     const lesson_has_empty_elements = (lesson_element) => {
         return lesson_element.startTime === null ||
             lesson_element.endTime === null ||
@@ -392,6 +407,7 @@ function parse_full_schedule(groups) {
             lesson_element.groupName === null
     }
 
+    /** @param {Lesson_Element_Response} lesson_element */
     const lesson_empty_elements = (lesson_element) => {
         const empty = [];
         if (lesson_element.startTime === null) empty.push("startTime");
@@ -457,6 +473,7 @@ function parse_full_schedule(groups) {
                     teacher_id: find_or_create_element(schedule.teachers, lesson_element.teacher),
                     room_id: find_or_create_element(schedule.rooms, lesson_element.room),
                     type_id: find_or_create_element(schedule.types, lesson_element.studyType),
+                    description: lesson_element.description,
                 });
             }
         }
@@ -471,7 +488,7 @@ function parse_full_schedule(groups) {
  * 
  * @param {number} size
  * @param {string} str
- * @returns {SVGElement}
+ * @returns {HTMLDivElement}
  */
 function lucide_icon_from_string(size, str) {
     const container = document.createElement("div");
@@ -485,7 +502,7 @@ function lucide_icon_from_string(size, str) {
 
 // TODO: rewrite this. The icons can be in an object, you call the lucide_icon_from_string yourself, with a better "Icon" name
 /**
- * @type {Record<string, (size: number) => SVGElement> as const}
+ * @type {Record<string, (size: number) => HTMLDivElement>}
  */
 const ICONS = {
     time_slot(size) {
@@ -527,7 +544,7 @@ const ICONS = {
 /**
  * @param {string} type
  * @param {object} options
- * @param {HTMLElement[]} children
+ * @param {(HTMLElement|string)[]} children
  * @returns HTMLElement
  */
 function el(type, options, ...children) {
@@ -547,7 +564,6 @@ function el(type, options, ...children) {
  * 
  * @param {HTMLElement} old_el
  * @param {HTMLElement} new_el
- * @returns HTMLElement
  */
 function replace(old_el, new_el) {
     old_el.replaceWith(new_el);
@@ -556,14 +572,14 @@ function replace(old_el, new_el) {
 
 /**
  * @param {Time_Of_Day} time_of_day
- * @returns {string}
  */
 function TimeOfDay(time_of_day) {
     /**
      * @param {number} n
      * @returns {string}
      */
-    const pad = (n) => n < 10 ? `0${n}` : n
+    const pad = (n) => n < 10 ? `0${n}` : `${n}`
+
     return el("span", {},
         el("span", { class: "time-hour" }, pad(time_of_day.hour)),
         el("span", { class: "time-sep" }, ":"),
@@ -573,7 +589,6 @@ function TimeOfDay(time_of_day) {
 
 /**
  * @param {Time_Slot} time_slot
- * @returns {string}
  */
 function TimeSlot(time_slot) {
     const start_str = TimeOfDay(time_slot.start)
@@ -590,7 +605,7 @@ function TimeSlot(time_slot) {
  * @returns {HTMLElement}
  */
 function LessonCard(lesson) {
-    /** @type {SVGElement} */
+    /** @type {HTMLElement} */
     let lesson_type_icon;
     let lesson_type_class = "unknown"
 
@@ -610,8 +625,8 @@ function LessonCard(lesson) {
     }
 
     /**
-     * 
-     * @param {SVGElement} icon
+     * @param {HTMLElement} icon
+     * @param {any} options
      * @param  {...HTMLElement} children
      * @returns 
      */
@@ -626,7 +641,7 @@ function LessonCard(lesson) {
     return el("div", { class: "lesson" },
         el("span", { class: "flex-row gap-1" },
             el("span", { class: "muted", style: "min-width: 14px; display: flex; justify-content: end;" },
-                lesson.time_slot_index + 1
+                (lesson.time_slot_index + 1).toString()
             ),
             el("span", {},
                 lesson.subject,
@@ -712,7 +727,7 @@ function DayCard(day) {
 }
 
 /**
- * @param {Day[]} day
+ * @param {Day[]} days
  * @returns {HTMLElement}
  */
 function Schedule(days) {
@@ -752,9 +767,9 @@ function schedule_filter_to_pathname(filter) {
 /**
  * @typedef App_State
  * @type {object}
- * @property {Full_Schedule} schedule
+ * @property {Full_Schedule|null} schedule
  * @property {Schedule_Filter|null} filter
- * @property {bool} show_next
+ * @property {boolean} show_next
 */
 
 
@@ -792,6 +807,7 @@ function App(state) {
     const group = state.filter?.value;
 
     const schedule = state.schedule;
+    if (!schedule) return el("div", {}, "Failed to load schedule");
     const group_id = schedule.groups.findIndex(el => el === group);
     if (group_id === -1) {
         console.error(`Failed to find group ${group}`)
@@ -846,6 +862,8 @@ function App(state) {
         if (input === "Дистанционный формат") {
             return "Дистант";
         }
+
+        return null;
     }
 
     for (const compressed_lesson of schedule.lessons) {
@@ -853,7 +871,9 @@ function App(state) {
             continue;
         }
 
-        let room_short = short_rooms[compressed_lesson.room_id];
+        /** @type {string|null} */
+        let room_short;
+        room_short = short_rooms[compressed_lesson.room_id];
         if (!room_short) {
             room_short = shorten_room(schedule.rooms[compressed_lesson.room_id]);
             if (room_short) {
@@ -861,7 +881,9 @@ function App(state) {
             }
         }
 
-        let teacher_short = short_teachers[compressed_lesson.teacher_id];
+        /** @type {string|null} */
+        let teacher_short;
+        teacher_short = short_teachers[compressed_lesson.teacher_id];
         if (!teacher_short) {
             teacher_short = shorten_teacher(schedule.teachers[compressed_lesson.teacher_id]);
             if (teacher_short) {
@@ -912,8 +934,8 @@ function App(state) {
     }
 
 
-    const current_week_el = Schedule(current_week, schedule.time_slots)
-    const next_week_el = Schedule(next_week, schedule.time_slots)
+    const current_week_el = Schedule(current_week)
+    const next_week_el = Schedule(next_week)
 
     let selected_week_el = state.show_next ? next_week_el : current_week_el;
 
@@ -980,6 +1002,7 @@ function cache_find_entries(key, version) {
     const entries = [];
     for (let i = 0; i < localStorage.length; i++) {
         const entry_str = localStorage.key(i);
+        if (!entry_str) continue;
         const entry = cache_entry_from_string(entry_str);
         if (!entry) continue;
         if (entry.key !== key) continue;
@@ -1034,8 +1057,8 @@ function cache_load_schedule() {
     // so we can afford to store only the latest
     // in the lcoalStorage. Cache would peobably
     // hold more, but I don't know how to do that
-    for (const key of cache_entries) {
-        localStorage.removeItem(key);
+    for (const entry of cache_entries) {
+        localStorage.removeItem(cache_entry_to_string(entry));
     }
 
     const schedule_key = cache_entry_to_string(entry);
@@ -1066,10 +1089,11 @@ function history_push_state(filter) {
 
 async function main() {
     const content = document.querySelector("#content");
+    if (!content) return;
     /** @type {App_State} */
-    let app_state = { schedule: null, show_next: false, selected_group: null };
-    /** @type {HTMLElement} */
-    let app_el;
+    let app_state = { schedule: null, show_next: false, filter: null };
+    /** @type {HTMLElement | undefined} */
+    let app_el = undefined;
 
     app_state.filter = schedule_filter_from_pathname(window.location.pathname);
     if (app_state.filter) {
@@ -1082,22 +1106,26 @@ async function main() {
 
 
     const cache = cache_load_schedule();
+    let should_update = true;
+
     if (cache) {
         app_state.schedule = cache.schedule;
         app_el = App(app_state);
         content.append(app_el);
+
+
+        const now = new Date();
+        const time_since_update = now.getTime() - cache.entry.date.getTime();
+        should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
     }
 
-    const now = new Date();
-    const time_since_update = now.getTime() - cache.entry.date.getTime();
-    let should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
-
-    if (!cache.schedule || should_update) {
+    if (!cache?.schedule || should_update) {
         const loaing_bar = LoadingBar();
+        /** @type {HTMLElement|null} */
         const loading_bar_inner = loaing_bar.querySelector(".loading-bar-inner");
+        if (!loading_bar_inner) return;
 
         loading_bar_inner.style.width = "0%";
-        const content = document.querySelector("#content");
         content.prepend(loaing_bar);
 
         let groups = await get_groups_raw();
@@ -1115,16 +1143,22 @@ async function main() {
 
         if (!all_schedules_result.ok) {
             console.error("Failed to get all schedules", all_schedules_result.err)
+            return;
         }
 
         app_state.schedule = parse_full_schedule(all_schedules_result.data);
 
         const date_str = new Date().getTime();
-        const key = `schedule-${SCHEDULE_CACHE_VERSION}-${date_str}`;
+        /** @type {Cache_Entry} */
+        const entry = {
+            key: "schedule",
+            version: SCHEDULE_CACHE_VERSION,
+            date: new Date(date_str),
+        };
         try {
-            localStorage.setItem(key, JSON.stringify(app_state.schedule));
-            if (schedule_cache_entry) {
-                localStorage.removeItem(schedule_cache_entry.key);
+            localStorage.setItem(cache_entry_to_string(entry), JSON.stringify(app_state.schedule));
+            if (cache) {
+                localStorage.removeItem(cache_entry_to_string(cache.entry));
             }
         } catch (e) {
             console.error("Failed to save to localStorage", e)
@@ -1133,7 +1167,13 @@ async function main() {
         loaing_bar.remove();
     }
 
+    if (!app_state.schedule) {
+        console.error("Failed to load schedule");
+        return;
+    }
 
+
+    /** @type {string[]} */
     const search_groups = [];
     for (const group of app_state.schedule.groups) {
         search_groups.push(group.toLowerCase().replace(/-/g, ""));
@@ -1142,9 +1182,12 @@ async function main() {
     /** @param {InputEvent} e  */
     const handle_search_input = (e) => {
         /** @type {HTMLInputElement} */
+        //@ts-ignore
         const target = e.target;
+
         const search = target.value.toLowerCase().replace(/-/g, "");
-        const results_el = target.parentElement.querySelector(".results");
+        const results_el = target.parentElement?.querySelector(".results");
+        if (!results_el) return;
         results_el.innerHTML = "";
 
         if (search.length < 1) {
@@ -1155,6 +1198,7 @@ async function main() {
         for (let i = 0; i < search_groups.length; i++) {
             const group_search = search_groups[i];
             if (group_search.includes(search)) {
+                if (!app_state.schedule) return;
                 const group = app_state.schedule.groups[i];
                 const group_el = el("button", { class: "result", onclick: handle_group_click, onkeydown: handle_search_key }, group);
                 results_el.append(group_el);
@@ -1172,13 +1216,21 @@ async function main() {
     const handle_search_key = (e) => {
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
             e.preventDefault();
+            /** @type {HTMLElement} */
+            //@ts-ignore
             const results_el = search_el.querySelector(".results");
             const children = results_el.children;
+
             if (children.length === 0) return;
             const focused = results_el.querySelector(":focus");
             if (!focused) {
-                children[0].focus();
+                /** @type {HTMLElement} */
+                //@ts-ignore
+                const first = children[0];
+                first.focus();
             } else {
+                /** @type {HTMLElement} */
+                //@ts-ignore
                 const next = e.key === "ArrowDown" ? focused.nextElementSibling : focused.previousElementSibling;
                 if (next) {
                     next.focus();
@@ -1203,11 +1255,13 @@ async function main() {
     }
 
     /** @type {HTMLButtonElement["onclick"]}*/
-    function handle_group_click(e) {
+    const handle_group_click = (e) => {
         /** @type {HTMLButtonElement} */
         const target = e.target;
         const group = target.innerText;
+        if (!app_state.filter) return;
         app_state.filter.value = group;
+        if (!app_el) return;
         app_el = replace(app_el, App(app_state));
 
         // this does not clear the search results,
@@ -1239,6 +1293,7 @@ async function main() {
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
         const group = event.state.group;
+        if (!app_el) return;
         app_el = replace(app_el, App(app_state));
         search_el.querySelector("input").value = group;
     });
