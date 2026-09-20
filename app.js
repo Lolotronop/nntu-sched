@@ -7,7 +7,7 @@ const GROUPS_PATH = "/lesson-schedule/public/groups";
 const GROUP_PARAMETER = "groupName";
 
 
-const SCHEDULE_CACHE_VERSION = 1;
+const SCHEDULE_CACHE_VERSION = 2;
 
 const DAY = 1000 * 60 * 60 * 24;
 const MINUTE = 1000 * 60;
@@ -196,6 +196,13 @@ async function get_all_groups_schedule_raw(groups, onload) {
     return ok(all_schedules);
 }
 
+/**
+ * @typedef Time_Of_Day
+ * @type {object}
+ *
+ * @property {number} hour
+ * @property {number} minute
+ */
 
 /**
  * @typedef Time_Slot
@@ -204,14 +211,6 @@ async function get_all_groups_schedule_raw(groups, onload) {
  * @property {Time_Of_Day} start
  * @property {Time_Of_Day} end
 */
-
-/**
- * @typedef Time_Of_Day
- * @type {object}
- *
- * @property {number} hour
- * @property {number} minute
- */
 
 /**
  * @param {string} slots expected to have only the actual times here, not the category title that is present in the Schedule_Response
@@ -329,8 +328,19 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
 }
 
 
+// taken from https://weeknumber.net/how-to/javascript
+/** @param {Date} d */
+function week_number(d) {
+    let date = new Date(d.getTime());
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+    let week1 = new Date(date.getFullYear(), 0, 4);
+    return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+
+
 /**
- * @typedef Compressed_Lesson
+ * @typedef Lesson_Compressed
  * @type {object}
  *
  * @property {number} subject_id
@@ -338,28 +348,27 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
  * @property {number} room_id
  * @property {number} type_id lecture/practice/lab/etc
  * @property {number} time_slot_id
- * @property {number} date_id
  * @property {number} group_id
+ * @property {number} day calculated as an offset from the even week monday
  *
  * @property {string|null} description
 */
 
 /**
- * @typedef Full_Schedule
+ * @typedef Schedule_Full
  * @type {object}
- * @property {Compressed_Lesson[]} lessons
+ * @property {Lesson_Compressed[]} lessons_compressed
  * @property {string[]} subjects
  * @property {string[]} teachers
  * @property {string[]} rooms
  * @property {string[]} types
  * @property {string[]} groups
- * @property {Date[]} dates
  * @property {Time_Slot[]} time_slots
  */
 
 /**
  * @param {{group: string, schedule_response: Schedule_Response}[]} groups
- * @returns {Full_Schedule}
+ * @returns {Schedule_Full}
  */
 function parse_full_schedule(groups) {
     //=======local functions======
@@ -452,15 +461,14 @@ function parse_full_schedule(groups) {
 
     //=======main loop============
 
-    /** @type {Full_Schedule} */
+    /** @type {Schedule_Full} */
     let schedule = {
-        lessons: [],
+        lessons_compressed: [],
         subjects: [],
         teachers: [],
         rooms: [],
         types: [],
         groups: [],
-        dates: [],
         time_slots: [],
     };
     for (const { group, schedule_response } of groups) {
@@ -484,17 +492,19 @@ function parse_full_schedule(groups) {
                 continue;
             }
 
-            const date_id = find_or_create_element(schedule.dates, parsed_date.data);
+            let day = parsed_date.data.getDay();
+            const week_even = week_number(parsed_date.data) % 2 === 0;
+            if (!week_even) day += 7;
 
             for (const lesson_element of lessonElements) {
                 if (is_lesson_empty(lesson_element)) {
                     continue;
                 }
 
-                schedule.lessons.push({
+                schedule.lessons_compressed.push({
                     group_id,
-                    date_id,
                     time_slot_id: lesson_element.timeIndex - 1,
+                    day,
                     subject_id: find_or_create_element(schedule.subjects, lesson_element.subject),
                     teacher_id: find_or_create_element(schedule.teachers, lesson_element.teacher),
                     room_id: find_or_create_element(schedule.rooms, lesson_element.room),
@@ -576,10 +586,10 @@ function cache_find_entries(key, version) {
 
 /**
  * @param {string} json
- * @returns {Full_Schedule|null}
+ * @returns {Schedule_Full|null}
  */
 function schedule_from_json(json) {
-    /** @type {Full_Schedule} */
+    /** @type {Schedule_Full} */
     let schedule;
     try {
         schedule = JSON.parse(json)
@@ -588,17 +598,11 @@ function schedule_from_json(json) {
         return null;
     }
 
-
-    for (let i = 0; i < schedule.dates.length; i++) {
-        const date_str = schedule.dates[i];
-        schedule.dates[i] = new Date(date_str);
-    }
-
     return schedule;
 }
 
 /**
- * @returns {{schedule: Full_Schedule, entry: Cache_Entry}|null}
+ * @returns {{schedule: Schedule_Full, entry: Cache_Entry}|null}
  */
 function cache_load_schedule() {
     const cache_entries = cache_find_entries("schedule", SCHEDULE_CACHE_VERSION);
@@ -625,7 +629,7 @@ function cache_load_schedule() {
 }
 
 /** 
- * @param {Full_Schedule} schedule 
+ * @param {Schedule_Full} schedule 
  * @returns {Cache_Entry}
  */
 function cache_save_schedule(schedule) {
@@ -644,6 +648,10 @@ function cache_save_schedule(schedule) {
 
     return entry;
 }
+
+// ======================
+// ======= HISTORY ======
+// ======================
 
 /**
  * @typedef History_State
@@ -683,9 +691,10 @@ function el(type, options, ...children) {
 }
 
 /**
- * 
- * @param {HTMLElement} old_el
- * @param {HTMLElement} new_el
+ * @template {HTMLElement} T
+ * @param {T} old_el
+ * @param {T} new_el
+ * @returns {T}
  */
 function replace(old_el, new_el) {
     old_el.replaceWith(new_el);
@@ -729,12 +738,10 @@ function TimeOfDay(time_of_day) {
  * @param {Time_Slot} time_slot
  */
 function TimeSlot(time_slot) {
-    const start_str = TimeOfDay(time_slot.start)
-    const end_str = TimeOfDay(time_slot.end)
     return el("span", { class: "time-slot" },
-        el("span", { class: "start" }, start_str),
+        el("span", { class: "start" }, TimeOfDay(time_slot.start)),
         el("span", { class: "sep" }, "-"),
-        el("span", { class: "end" }, end_str),
+        el("span", { class: "end" }, TimeOfDay(time_slot.end)),
     )
 }
 
@@ -905,7 +912,7 @@ function schedule_filter_to_pathname(filter) {
 /**
  * @typedef App_State
  * @type {object}
- * @property {Full_Schedule|null} schedule
+ * @property {Schedule_Full|null} schedule
  * @property {Schedule_Filter|null} filter
  * @property {boolean} show_next
 */
@@ -1062,7 +1069,6 @@ function SearchBar(app_state, onselect) {
 
 /**
  * @param {App_State} state
- * @returns {HTMLElement}
  */
 function App(state) {
     const group = state.filter?.value;
@@ -1074,9 +1080,6 @@ function App(state) {
         console.error(`Failed to find group ${group}`)
         return el("div", {}, "Failed to find group");
     }
-
-    /** @type {Lesson[]} */
-    let lessons = [];
 
     /** @type Record<string, string> */
     const short_teachers = {};
@@ -1127,7 +1130,51 @@ function App(state) {
         return null;
     }
 
-    for (const compressed_lesson of schedule.lessons) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    let this_week_no = week_number(now);
+    const this_week_even = this_week_no % 2 === 0;
+    const even_monday = new Date(now.getTime());
+    even_monday.setHours(0, 0, 0, 0);
+
+    // for WTF is a kilometer reasons .getDay returns 0 for sunday.
+    // this means that monday is 1, so I need to subtract 1 from the result
+    // but a negative number is not a valid day of the week, so I need to
+    // add 7 to the result, then modulo 7 it to get the correct day of the week
+    let actual_day_of_the_week = (even_monday.getDay() - 1 + 7) % 7;
+    let even_monday_offset = -actual_day_of_the_week;
+    if (!this_week_even) {
+        even_monday_offset -= 7;
+    }
+    even_monday.setDate(even_monday.getDate() + even_monday_offset);
+
+    /** @type {Day[]} */
+    const even_week = [];
+    for (let i = 0; i < 6; i++) {
+        const date = new Date(even_monday);
+        if (this_week_even) {
+            date.setDate(date.getDate() + i);
+        } else {
+            date.setDate(date.getDate() + i + 14);
+        }
+        even_week.push({
+            date,
+            lessons: [],
+        })
+    }
+
+    /** @type {Day[]} */
+    const odd_week = [];
+    for (let i = 0; i < 6; i++) {
+        const date = new Date(even_monday);
+        date.setDate(date.getDate() + i + 7);
+        odd_week.push({
+            date,
+            lessons: [],
+        })
+    }
+
+    for (const compressed_lesson of schedule.lessons_compressed) {
         if (compressed_lesson.group_id !== group_id) {
             continue;
         }
@@ -1152,48 +1199,48 @@ function App(state) {
             }
         }
 
+        const date = new Date(even_monday);
+        date.setDate(date.getDate() + compressed_lesson.day);
+        if (week_number(date) % 2 === 0 && !this_week_even) {
+            date.setDate(date.getDate() + 14);
+        }
+
         /** @type {Lesson} */
         const lesson = {
             group: schedule.groups[compressed_lesson.group_id],
-            date: schedule.dates[compressed_lesson.date_id],
             time_slot: schedule.time_slots[compressed_lesson.time_slot_id],
             time_slot_index: compressed_lesson.time_slot_id,
             subject: schedule.subjects[compressed_lesson.subject_id],
             teacher_full: schedule.teachers[compressed_lesson.teacher_id],
             teacher_short,
+            date,
             room: schedule.rooms[compressed_lesson.room_id],
             room_short,
             type: schedule.types[compressed_lesson.type_id],
             description: compressed_lesson.description,
         }
-        lessons.push(lesson);
+
+        const week = week_number(date) % 2 === 0 ? even_week : odd_week;
+        for (const day of week) {
+            if (day.date.getTime() === date.getTime()) {
+                day.lessons.push(lesson);
+                break;
+            }
+        }
     }
 
-    const this_week_dates = schedule.dates.slice(0, 6);
-    const next_week_dates = schedule.dates.slice(6, 12);
-
     /** @type {Day[]} */
-    const current_week = this_week_dates.map(date => ({ date, lessons: [] }));
+    let current_week;
     /** @type {Day[]} */
-    const next_week = next_week_dates.map(date => ({ date, lessons: [] }));
+    let next_week;
 
-    for (const lesson of lessons) {
-        let date_index;
-        date_index = this_week_dates.findIndex(el => el.getTime() === lesson.date.getTime());
-        if (date_index !== -1) {
-            current_week[date_index].lessons.push(lesson);
-            continue;
-        }
-
-        date_index = next_week_dates.findIndex(el => el.getTime() === lesson.date.getTime());
-        if (date_index !== -1) {
-            next_week[date_index].lessons.push(lesson);
-            continue;
-        }
-
-        console.error("Failed to find date", lesson.date);
+    if (week_number(now) % 2 === 0) {
+        current_week = even_week;
+        next_week = odd_week;
+    } else {
+        current_week = odd_week;
+        next_week = even_week;
     }
-
 
     const current_week_el = Schedule(current_week)
     const next_week_el = Schedule(next_week)
@@ -1232,8 +1279,8 @@ async function main() {
 
     /** @type {App_State} */
     let app_state = { schedule: null, show_next: false, filter: null };
-    /** @type {HTMLElement} */
-    let app_el = el("div", {}, "Loading...");
+    let schedule_el = el("div", {});
+    content.append(schedule_el);
 
     app_state.filter = schedule_filter_from_pathname(window.location.pathname);
     if (app_state.filter) {
@@ -1251,8 +1298,7 @@ async function main() {
 
     if (cache) {
         app_state.schedule = cache.schedule;
-        app_el = App(app_state);
-        content.append(app_el);
+        schedule_el = replace(schedule_el, App(app_state));
 
         const now = new Date();
         const time_since_update = now.getTime() - cache.entry.date.getTime();
@@ -1304,12 +1350,12 @@ async function main() {
     const search = SearchBar(app_state, (filter) => {
         history_push_state(filter);
         app_state.filter = filter;
-        app_el = replace(app_el, App(app_state));
+        schedule_el = replace(schedule_el, App(app_state));
     });
 
     content.prepend(search.el);
 
-    app_el = replace(app_el, App(app_state));
+    schedule_el = replace(schedule_el, App(app_state));
 
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
@@ -1320,7 +1366,7 @@ async function main() {
             return;
         }
         app_state.filter = history_state.filter;
-        app_el = replace(app_el, App(app_state));
+        schedule_el = replace(schedule_el, App(app_state));
         search.input_el.value = app_state.filter.value;
     });
 }

@@ -1,3 +1,5 @@
+// @ts-check
+
 import "./mock-server.js";
 import fs from "node:fs/promises";
 import http from "node:http";
@@ -12,6 +14,7 @@ const ASSET_NAMES = [
     "sw.js",
 ]
 
+/** @type {Record<string, Buffer<ArrayBuffer>|string>} */
 const ASSETS = {};
 
 for (const name of ASSET_NAMES) {
@@ -53,6 +56,7 @@ let client;
 /** @param {fs.FileChangeInfo<string>} e */
 async function handle_file_change(e) {
     const name = e.filename;
+    if (!name) return;
     ASSETS[name] = await fs.readFile(name);
     if (name === "index.html") {
         ASSETS["index.html"] = `${ASSETS["index.html"]}\n<script>${CLIENT_PROGRAM}</script>`;
@@ -63,15 +67,12 @@ async function handle_file_change(e) {
     client = undefined;
 }
 
+/** @param {string} path */
 async function register_file_watcher(path) {
     for await (const update of fs.watch(path)) {
         handle_file_change(update);
     }
 }
-
-async function main() {
-}
-
 
 const server = http.createServer(async (req, res) => {
     if (!req.url) return;
@@ -94,9 +95,10 @@ const server = http.createServer(async (req, res) => {
     for (const name of ASSET_NAMES) {
         if (path !== name) continue;
 
-        const extensino = path.split(".").pop();
+        const extension = path.split(".").pop();
+        /** @type {string} */
         let content_type;
-        switch (extensino) {
+        switch (extension) {
             case "js":
                 content_type = "text/javascript";
                 break;

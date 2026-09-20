@@ -6,6 +6,15 @@ const PORT = 3000;
 const SCHEDULE_PATH = "/lesson-schedule/public/group-schedule"
 const GROUPS_PATH = "/lesson-schedule/public/groups"
 const GROUP_PARAMETER = "groupName"
+
+const groups_list = await fs.readFile("./mock-data/groups.json", "utf-8");
+const groups = {};
+for (const group of JSON.parse(groups_list)) {
+    groups[group] = JSON.parse(await fs.readFile(`./mock-data/groups/${group}.json`, "utf-8"));
+}
+
+const full = JSON.stringify(groups);
+
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname;
@@ -30,6 +39,12 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (path === "/all") {
+        res.writeHead(200, headers);
+        res.end(full);
+        return;
+    }
+
     if (path === SCHEDULE_PATH) {
         const group = url.searchParams.get(GROUP_PARAMETER);
         if (!group) {
@@ -39,7 +54,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         try {
-            const schedule_raw = await fs.readFile(`./mock-data/groups/${group}.json`, "utf-8");
+            const schedule_raw = JSON.stringify(groups[group]);
             res.writeHead(200, headers);
             res.end(schedule_raw);
         } catch (e) {
@@ -51,9 +66,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === GROUPS_PATH) {
-        const groups_raw = await fs.readFile("./mock-data/groups.json", "utf-8");
         res.writeHead(200, headers);
-        res.end(groups_raw);
+        res.end(groups_list);
         return;
     }
 });
