@@ -1,4 +1,4 @@
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const CURRENT_CACHES = {
     app: `app-v${CACHE_VERSION}`,
 };
