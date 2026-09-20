@@ -1313,9 +1313,15 @@ async function main() {
 
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
-        const group = event.state.group;
+        /** @type {History_State} */
+        const history_state = event.state;
+        if (!history_state.filter) {
+            console.error("No filter in history found");
+            return;
+        }
+        app_state.filter = history_state.filter;
         app_el = replace(app_el, App(app_state));
-        search.input_el.value = group;
+        search.input_el.value = app_state.filter.value;
     });
 }
 
