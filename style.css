@@ -58,6 +58,11 @@ body {
         border: 1px solid var(--border);
         background-color: var(--card-bg);
         color: var(--text-fg);
+        outline: none;
+
+        &:focus {
+            border-color: var(--accent);
+        }
     }
 
     &:focus-within input:not(:placeholder-shown)+.results {
@@ -87,9 +92,9 @@ body {
             color: var(--text-fg);
             position: relative;
             text-align: left;
+            outline: none;
 
-            &:focus,
-            &:hover {
+            &:focus {
                 background-color: var(--accent-bg);
             }
         }

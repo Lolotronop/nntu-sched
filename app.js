@@ -14,6 +14,36 @@ const MINUTE = 1000 * 60;
 
 const SCHEDULE_CACHE_TIMEOUT = IS_DEV ? DAY : DAY;
 
+
+const ICONS = {
+    // return https://lucide.dev/icons/clock-fading
+    time_slot: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock-fading"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M12 6v6l4 2"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/circle-user
+    teacher: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-user"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/school
+    room: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-school"><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M18 4.933V21"/><path d="m4 6 7.106-3.79a2 2 0 0 1 1.788 0L20 6"/><path d="m6 11-3.52 2.147a1 1 0 0 0-.48.854V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a1 1 0 0 0-.48-.853L18 11"/><path d="M6 4.933V21"/><circle cx="12" cy="9" r="2"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/scroll-text
+    lecture: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-scroll-text"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/hammer
+    practice: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-hammer"><path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/flask-conical
+    lab: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flask-conical"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>`
+    ,
+
+    // https://lucide.dev/icons/badge-question-mark
+    unknown: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-badge-question-mark"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`
+};
+
 /**
  * @template T
  * @typedef Result_Success<T>
@@ -60,8 +90,9 @@ function err(err) {
 
 
 /**
+ * @template T
  * @param {string} uri
- * @returns {Promise<Result<unknown, string>>}
+ * @returns {Promise<Result<T, string>>}
  */
 async function fetch_json(uri) {
     let req;
@@ -72,6 +103,7 @@ async function fetch_json(uri) {
         return err(`Failed to fetch json ${e}`)
     }
     if (!req.ok) return err("Failed to fetch json")
+    /** @type {T} */
     let data;
     try {
         data = await req.json()
@@ -118,7 +150,6 @@ async function fetch_json(uri) {
  */
 function get_schedule_raw(group) {
     const group_param = encodeURIComponent(group)
-    // @ts-ignore
     return fetch_json(`${BASE_PATH}${SCHEDULE_PATH}?${GROUP_PARAMETER}=${group_param}`)
 }
 
@@ -132,7 +163,6 @@ function get_schedule_raw(group) {
  * @returns {Promise<Result<Groups_Response, string>>}
  */
 function get_groups_raw() {
-    // @ts-ignore
     return fetch_json(`${BASE_PATH}${GROUPS_PATH}`)
 }
 
@@ -332,9 +362,7 @@ function parse_ru_date(str, year = new Date().getFullYear()) {
  * @returns {Full_Schedule}
  */
 function parse_full_schedule(groups) {
-    //============================
     //=======local functions======
-    //============================
 
     /**
      * @param {Schedule_Response} schedule
@@ -397,34 +425,32 @@ function parse_full_schedule(groups) {
     // these 2 are useful during debug
 
     /** @param {Lesson_Element_Response} lesson_element */
-    const lesson_has_empty_elements = (lesson_element) => {
-        return lesson_element.startTime === null ||
-            lesson_element.endTime === null ||
-            lesson_element.subject === '' ||
-            lesson_element.studyType === '' ||
-            lesson_element.room === '' ||
-            lesson_element.teacher === '' ||
-            lesson_element.groupName === null
-    }
+    // const _lesson_has_empty_elements = (lesson_element) => {
+    //     return lesson_element.startTime === null ||
+    //         lesson_element.endTime === null ||
+    //         lesson_element.subject === '' ||
+    //         lesson_element.studyType === '' ||
+    //         lesson_element.room === '' ||
+    //         lesson_element.teacher === '' ||
+    //         lesson_element.groupName === null
+    // }
 
     /** @param {Lesson_Element_Response} lesson_element */
-    const lesson_empty_elements = (lesson_element) => {
-        const empty = [];
-        if (lesson_element.startTime === null) empty.push("startTime");
-        if (lesson_element.endTime === null) empty.push("endTime");
-        if (lesson_element.subject === '') empty.push("subject");
-        if (lesson_element.studyType === '') empty.push("studyType");
-        if (lesson_element.room === '') empty.push("room");
-        if (lesson_element.teacher === '') empty.push("teacher");
-        if (lesson_element.groupName === null) empty.push("groupName");
-        return empty;
-    }
+    // const _lesson_empty_elements = (lesson_element) => {
+    //     const empty = [];
+    //     if (lesson_element.startTime === null) empty.push("startTime");
+    //     if (lesson_element.endTime === null) empty.push("endTime");
+    //     if (lesson_element.subject === '') empty.push("subject");
+    //     if (lesson_element.studyType === '') empty.push("studyType");
+    //     if (lesson_element.room === '') empty.push("room");
+    //     if (lesson_element.teacher === '') empty.push("teacher");
+    //     if (lesson_element.groupName === null) empty.push("groupName");
+    //     return empty;
+    // }
 
 
 
-    //============================
     //=======main loop============
-    //============================
 
     /** @type {Full_Schedule} */
     let schedule = {
@@ -482,51 +508,164 @@ function parse_full_schedule(groups) {
     return schedule;
 }
 
+// ======================
+// === CACHE HANDLING ===
+// ======================
 
+/**
+ * @typedef Cache_Entry
+ * @type {object}
+ * @property {string} key
+ * @property {number} version
+ * @property {Date} date
+ */
+
+
+const CACHE_SEPARATOR = "-";
+/**
+ * @param {Cache_Entry} entry
+ * @returns {string}
+ */
+function cache_entry_to_string(entry) {
+    return `${entry.key}${CACHE_SEPARATOR}${entry.version}${CACHE_SEPARATOR}${entry.date.getTime()}`;
+}
 
 /**
  * @param {string} str
- * @param {number} size
- * @returns {HTMLDivElement}
+ * @returns {Cache_Entry|null}
  */
-function Icon(str, size) {
-    const container = document.createElement("div");
-    container.setAttribute("class", "icon")
-    container.setAttribute("style", `width: ${size}px; height: ${size}px`)
-    container.innerHTML = str.trim()
-        .replace(`width="24"`, `width="100%"`)
-        .replace(`height="24"`, `height="100%"`);
-    return container;
+function cache_entry_from_string(str) {
+    const parts = str.split(CACHE_SEPARATOR);
+    if (parts.length !== 3) return null;
+    let [key, version_str, date_str] = parts;
+    const version = +version_str;
+    if (isNaN(version)) return null;
+    const date = new Date(+date_str);
+    if (isNaN(date.getTime())) return null;
+    return { key, version, date };
 }
 
-const ICONS = {
-    // return https://lucide.dev/icons/clock-fading
-    time_slot: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock-fading"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M12 6v6l4 2"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>`
-    ,
+/**
+ * @param {string} key
+ * @param {number} version
+ * @returns {Cache_Entry[]} sorted by date, newest first
+ */
+function cache_find_entries(key, version) {
+    /** @type {Cache_Entry[]} */
+    const entries = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const entry_str = localStorage.key(i);
+        if (!entry_str) continue;
+        const entry = cache_entry_from_string(entry_str);
+        if (!entry) continue;
+        if (entry.key !== key) continue;
+        if (entry.version !== version) {
+            console.warn(`Cache key ${entry_str} version does not match current ${version}, deleting`);
+            localStorage.removeItem(entry_str);
+            continue;
+        }
+        entries.push(entry);
+    }
 
-    // https://lucide.dev/icons/circle-user
-    teacher: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-user"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>`
-    ,
+    entries.sort((a, b) => {
+        return a.date.getTime() - b.date.getTime();
+    })
+    return entries;
+}
 
-    // https://lucide.dev/icons/school
-    room: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-school"><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M18 4.933V21"/><path d="m4 6 7.106-3.79a2 2 0 0 1 1.788 0L20 6"/><path d="m6 11-3.52 2.147a1 1 0 0 0-.48.854V19a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a1 1 0 0 0-.48-.853L18 11"/><path d="M6 4.933V21"/><circle cx="12" cy="9" r="2"/></svg>`
-    ,
 
-    // https://lucide.dev/icons/scroll-text
-    lecture: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-scroll-text"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg>`
-    ,
+/**
+ * @param {string} json
+ * @returns {Full_Schedule|null}
+ */
+function schedule_from_json(json) {
+    /** @type {Full_Schedule} */
+    let schedule;
+    try {
+        schedule = JSON.parse(json)
+    } catch (e) {
+        console.error("Failed to parse schedule", e);
+        return null;
+    }
 
-    // https://lucide.dev/icons/hammer
-    practice: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-hammer"><path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/></svg>`
-    ,
 
-    // https://lucide.dev/icons/flask-conical
-    lab: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flask-conical"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>`
-    ,
+    for (let i = 0; i < schedule.dates.length; i++) {
+        const date_str = schedule.dates[i];
+        schedule.dates[i] = new Date(date_str);
+    }
 
-    // https://lucide.dev/icons/badge-question-mark
-    unknown: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-badge-question-mark"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`
-};
+    return schedule;
+}
+
+/**
+ * @returns {{schedule: Full_Schedule, entry: Cache_Entry}|null}
+ */
+function cache_load_schedule() {
+    const cache_entries = cache_find_entries("schedule", SCHEDULE_CACHE_VERSION);
+    if (cache_entries.length === 0) return null;
+    let entry = cache_entries.shift();
+    if (!entry) return null;
+
+    // the cache entries are pretty big
+    // so we can afford to store only the latest
+    // in the lcoalStorage. Cache would peobably
+    // hold more, but I don't know how to do that
+    for (const entry of cache_entries) {
+        localStorage.removeItem(cache_entry_to_string(entry));
+    }
+
+    const schedule_key = cache_entry_to_string(entry);
+    const json = localStorage.getItem(schedule_key);
+    if (!json) return null;
+
+    const schedule = schedule_from_json(json);
+    if (!schedule) return null;
+
+    return { schedule, entry };
+}
+
+/** 
+ * @param {Full_Schedule} schedule 
+ * @returns {Cache_Entry}
+ */
+function cache_save_schedule(schedule) {
+    /** @type {Cache_Entry} */
+    const entry = {
+        key: "schedule",
+        version: SCHEDULE_CACHE_VERSION,
+        date: new Date(),
+    };
+
+    try {
+        localStorage.setItem(cache_entry_to_string(entry), JSON.stringify(schedule));
+    } catch (e) {
+        console.error("Failed to save to localStorage", e)
+    }
+
+    return entry;
+}
+
+/**
+ * @typedef History_State
+ * @type {object}
+ * @property {Schedule_Filter|null} filter
+ */
+
+/**
+ * @param {Schedule_Filter} filter
+ */
+function history_push_state(filter) {
+    /** @type {History_State|undefined} */
+    const state = window.history.state;
+    if (state?.filter === filter) return;
+    window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
+}
+
+
+// ======================
+// ======== UI ==========
+// ======================
+
 
 /**
  * @template {keyof HTMLElementTagNameMap} K
@@ -551,6 +690,22 @@ function el(type, options, ...children) {
 function replace(old_el, new_el) {
     old_el.replaceWith(new_el);
     return new_el;
+}
+
+/**
+ * @param {string} str
+ * @param {number} size
+ * @returns {HTMLDivElement}
+ */
+function Icon(str, size) {
+    const container = el("div", {
+        class: "icon",
+        style: `width: ${size}px; height: ${size}px`
+    });
+    container.innerHTML = str.trim()
+        .replace(`width="24"`, `width="100%"`)
+        .replace(`height="24"`, `height="100%"`);
+    return container;
 }
 
 /**
@@ -778,8 +933,131 @@ function SelectorButtons(show_next, onselect) {
     )
 }
 
-function LoadingBar() {
-    return el("div", { class: "loading-bar" }, el("div", { class: "loading-bar-inner" }))
+
+/**
+ * @param {App_State} app_state 
+ * @param {(filter: Schedule_Filter) => void} onselect
+ */
+function SearchBar(app_state, onselect) {
+    /** @type {string[]} */
+    const search_groups = [];
+    for (const group of app_state.schedule?.groups || []) {
+        search_groups.push(group.toLowerCase().replace(/-/g, ""));
+    }
+
+    /** @param {InputEvent|FocusEvent} e  */
+    const handle_search_input = (e) => {
+        /** @type {HTMLInputElement} */
+        //@ts-ignore
+        const target = e.target;
+
+        const search = target.value.toLowerCase().replace(/-/g, "");
+        results_el.innerHTML = "";
+
+        if (search.length < 1) {
+            results_el.classList.add("hidden");
+            return;
+        }
+        let matches = 0;
+        for (let i = 0; i < search_groups.length; i++) {
+            const group_search = search_groups[i];
+            if (group_search.includes(search)) {
+                if (!app_state.schedule) return;
+                const group = app_state.schedule.groups[i];
+                const group_el = el("button", { class: "result", onkeydown: handle_search_key }, group);
+
+                group_el.onmouseenter = () => {
+                    group_el.focus();
+                }
+
+                group_el.onclick = () => {
+                    // this does not clear the search results,
+                    // but I kinda like that behavior
+                    input_el.value = group;
+                    group_el.blur();
+
+                    onselect({
+                        by: "group",
+                        value: group,
+                    })
+                }
+
+                results_el.append(group_el);
+                matches++;
+            }
+        }
+        if (matches === 0) {
+            results_el.classList.add("hidden");
+        } else {
+            results_el.classList.remove("hidden");
+        }
+    }
+
+    /** @param {KeyboardEvent} e  */
+    const handle_search_key = (e) => {
+        if (!(e.target instanceof HTMLElement)) return;
+
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const children = results_el.children;
+
+            if (children.length === 0) return;
+            const focused = results_el.querySelector(":focus");
+
+            /** @type {HTMLElement} */
+            let element = search_el;
+            if (focused && focused instanceof HTMLElement) {
+                const next = e.key === "ArrowDown" ? focused.nextElementSibling : focused.previousElementSibling;
+                if (next && next instanceof HTMLElement) {
+                    element = next;
+                }
+            } else if (children.length > 0 && children[0] instanceof HTMLElement) {
+                element = children[0];
+            }
+
+            element.focus();
+
+            return;
+        }
+
+        const target = e.target;
+
+        if (e.key === "Enter") {
+            e.preventDefault();
+            /** @type {HTMLElement|null} */
+            const focused = results_el.querySelector(":focus");
+            if (focused) {
+                focused.click();
+            } else {
+                const first = results_el.children[0];
+                if (!first || !(first instanceof HTMLElement)) return;
+                first.click();
+            }
+
+            return;
+        }
+
+        if (target.tagName !== "INPUT") {
+            input_el.focus();
+        }
+    }
+
+    const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
+    const results_el = el("div", { class: "results" });
+    const search_el = el("div", { class: "search", style: "margin-bottom: 1em;" },
+        input_el,
+        results_el
+    );
+
+    if (app_state.filter) {
+        input_el.value = app_state.filter.value;
+    }
+
+    return {
+        el: search_el,
+        input_el,
+        results_el,
+    }
 }
 
 /**
@@ -942,142 +1220,20 @@ function App(state) {
     return self;
 }
 
-/**
- * @typedef Cache_Entry
- * @type {object}
- * @property {string} key
- * @property {number} version
- * @property {Date} date
- */
-
-
-const CACHE_SEPARATOR = "-";
-/**
- * @param {Cache_Entry} entry
- * @returns {string}
- */
-function cache_entry_to_string(entry) {
-    return `${entry.key}${CACHE_SEPARATOR}${entry.version}${CACHE_SEPARATOR}${entry.date.getTime()}`;
-}
-
-/**
- * @param {string} str
- * @returns {Cache_Entry|null}
- */
-function cache_entry_from_string(str) {
-    const parts = str.split(CACHE_SEPARATOR);
-    if (parts.length !== 3) return null;
-    let [key, version_str, date_str] = parts;
-    const version = +version_str;
-    if (isNaN(version)) return null;
-    const date = new Date(+date_str);
-    if (isNaN(date.getTime())) return null;
-    return { key, version, date };
-}
-
-/**
- * @param {string} key
- * @param {number} version
- * @returns {Cache_Entry[]} sorted by date, newest first
- */
-function cache_find_entries(key, version) {
-    /** @type {Cache_Entry[]} */
-    const entries = [];
-    for (let i = 0; i < localStorage.length; i++) {
-        const entry_str = localStorage.key(i);
-        if (!entry_str) continue;
-        const entry = cache_entry_from_string(entry_str);
-        if (!entry) continue;
-        if (entry.key !== key) continue;
-        if (entry.version !== version) {
-            console.warn(`Cache key ${entry_str} version does not match current ${version}, deleting`);
-            localStorage.removeItem(entry_str);
-            continue;
-        }
-        entries.push(entry);
-    }
-
-    entries.sort((a, b) => {
-        return a.date.getTime() - b.date.getTime();
-    })
-    return entries;
-}
-
-
-/**
- * @param {string} json
- * @returns {Full_Schedule|null}
- */
-function schedule_from_json(json) {
-    /** @type {Full_Schedule} */
-    let schedule;
-    try {
-        schedule = JSON.parse(json)
-    } catch (e) {
-        console.error("Failed to parse schedule", e);
-        return null;
-    }
-
-
-    for (let i = 0; i < schedule.dates.length; i++) {
-        const date_str = schedule.dates[i];
-        schedule.dates[i] = new Date(date_str);
-    }
-
-    return schedule;
-}
-
-/**
- * @returns {{schedule: Full_Schedule, entry: Cache_Entry}|null}
- */
-function cache_load_schedule() {
-    const cache_entries = cache_find_entries("schedule", SCHEDULE_CACHE_VERSION);
-    if (cache_entries.length === 0) return null;
-    let entry = cache_entries.shift();
-    if (!entry) return null;
-
-    // the cache entries are pretty big
-    // so we can afford to store only the latest
-    // in the lcoalStorage. Cache would peobably
-    // hold more, but I don't know how to do that
-    for (const entry of cache_entries) {
-        localStorage.removeItem(cache_entry_to_string(entry));
-    }
-
-    const schedule_key = cache_entry_to_string(entry);
-    const json = localStorage.getItem(schedule_key);
-    if (!json) return null;
-
-    const schedule = schedule_from_json(json);
-    if (!schedule) return null;
-
-    return { schedule, entry };
-}
-
-/**
- * @typedef History_State
- * @type {object}
- * @property {Schedule_Filter|null} filter
- */
-
-/**
- * @param {Schedule_Filter} filter
- */
-function history_push_state(filter) {
-    /** @type {History_State|undefined} */
-    const state = window.history.state;
-    if (state?.filter === filter) return;
-    window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
-}
 
 async function main() {
     const content = document.querySelector("#content");
-    if (!content) return;
+    if (!content) {
+        const body = document.querySelector("body");
+        if (!body) return;
+        body.innerHTML = "Failed to find content element. The princess is in another castle, mate";
+        return;
+    }
 
     /** @type {App_State} */
     let app_state = { schedule: null, show_next: false, filter: null };
-    /** @type {HTMLElement | undefined} */
-    let app_el = undefined;
+    /** @type {HTMLElement} */
+    let app_el = el("div", {}, "Loading...");
 
     app_state.filter = schedule_filter_from_pathname(window.location.pathname);
     if (app_state.filter) {
@@ -1086,10 +1242,11 @@ async function main() {
 
     if (!app_state.filter) {
         app_state.filter = { by: "group", value: "М26-ИСТ-3" };
+        history_push_state(app_state.filter);
     }
 
 
-    const cache = cache_load_schedule();
+    let cache = cache_load_schedule();
     let should_update = true;
 
     if (cache) {
@@ -1097,28 +1254,23 @@ async function main() {
         app_el = App(app_state);
         content.append(app_el);
 
-
         const now = new Date();
         const time_since_update = now.getTime() - cache.entry.date.getTime();
         should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
     }
 
-    if (!cache?.schedule || should_update) {
-        const loaing_bar = LoadingBar();
-        /** @type {HTMLElement|null} */
-        const loading_bar_inner = loaing_bar.querySelector(".loading-bar-inner");
-        if (!loading_bar_inner) return;
-
+    if (should_update) {
+        const loading_bar_inner = el("div", { class: "loading-bar-inner" });
+        const loading_bar = el("div", { class: "loading-bar" }, loading_bar_inner);
         loading_bar_inner.style.width = "0%";
-        content.prepend(loaing_bar);
+
+        content.prepend(loading_bar);
 
         let groups = await get_groups_raw();
         if (!groups.ok) {
-            console.error("Failed to get groups")
-            return err("Failed to get groups")
+            console.error("Failed to get groups");
+            return;
         }
-
-        groups.data = groups.data.slice(groups.data.length / 2, groups.data.length - 1);
 
         const all_schedules_result = await get_all_groups_schedule_raw(groups.data, (count) => {
             const percent = Math.round(count / groups.data.length * 100);
@@ -1131,24 +1283,17 @@ async function main() {
         }
 
         app_state.schedule = parse_full_schedule(all_schedules_result.data);
-
-        const date_str = new Date().getTime();
-        /** @type {Cache_Entry} */
-        const entry = {
-            key: "schedule",
-            version: SCHEDULE_CACHE_VERSION,
-            date: new Date(date_str),
-        };
-        try {
-            localStorage.setItem(cache_entry_to_string(entry), JSON.stringify(app_state.schedule));
-            if (cache) {
-                localStorage.removeItem(cache_entry_to_string(cache.entry));
-            }
-        } catch (e) {
-            console.error("Failed to save to localStorage", e)
+        const entry = cache_save_schedule(app_state.schedule);
+        if (cache) {
+            localStorage.removeItem(cache_entry_to_string(cache.entry));
         }
 
-        loaing_bar.remove();
+        cache = {
+            entry,
+            schedule: app_state.schedule,
+        }
+
+        loading_bar.remove();
     }
 
     if (!app_state.schedule) {
@@ -1156,130 +1301,21 @@ async function main() {
         return;
     }
 
-
-    /** @type {string[]} */
-    const search_groups = [];
-    for (const group of app_state.schedule.groups) {
-        search_groups.push(group.toLowerCase().replace(/-/g, ""));
-    }
-
-    /** @param {InputEvent|FocusEvent} e  */
-    const handle_search_input = (e) => {
-        /** @type {HTMLInputElement} */
-        //@ts-ignore
-        const target = e.target;
-
-        const search = target.value.toLowerCase().replace(/-/g, "");
-        const results_el = target.parentElement?.querySelector(".results");
-        if (!results_el) return;
-        results_el.innerHTML = "";
-
-        if (search.length < 1) {
-            results_el.classList.add("hidden");
-            return;
-        }
-        let matches = 0;
-        for (let i = 0; i < search_groups.length; i++) {
-            const group_search = search_groups[i];
-            if (group_search.includes(search)) {
-                if (!app_state.schedule) return;
-                const group = app_state.schedule.groups[i];
-                const group_el = el("button", { class: "result", onclick: handle_group_click, onkeydown: handle_search_key }, group);
-                results_el.append(group_el);
-                matches++;
-            }
-        }
-        if (matches === 0) {
-            results_el.classList.add("hidden");
-        } else {
-            results_el.classList.remove("hidden");
-        }
-    }
-
-    /** @param {KeyboardEvent} e  */
-    const handle_search_key = (e) => {
-        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-            e.preventDefault();
-            /** @type {HTMLElement} */
-            //@ts-ignore
-            const results_el = search_el.querySelector(".results");
-            const children = results_el.children;
-
-            if (children.length === 0) return;
-            const focused = results_el.querySelector(":focus");
-            if (!focused) {
-                /** @type {HTMLElement} */
-                //@ts-ignore
-                const first = children[0];
-                first.focus();
-            } else {
-                /** @type {HTMLElement} */
-                //@ts-ignore
-                const next = e.key === "ArrowDown" ? focused.nextElementSibling : focused.previousElementSibling;
-                if (next) {
-                    next.focus();
-                }
-            }
-        }
-
-        if (e.key === "Enter") {
-            if (e.target.tagName === "INPUT") {
-                e.preventDefault();
-                const results_el = search_el.querySelector(".results");
-                const search_input = e.target;
-                const focused = results_el.querySelector(":focus");
-                if (focused) {
-                    focused.click();
-                } else {
-                    results_el.children[0].click();
-                }
-                search_input.blur();
-            }
-        }
-    }
-
-    /** @type {HTMLButtonElement["onclick"]}*/
-    const handle_group_click = (e) => {
-        /** @type {HTMLButtonElement} */
-        const target = e.target;
-        const group = target.innerText;
-        if (!app_state.filter) return;
-        app_state.filter.value = group;
-        if (!app_el) return;
+    const search = SearchBar(app_state, (filter) => {
+        history_push_state(filter);
+        app_state.filter = filter;
         app_el = replace(app_el, App(app_state));
+    });
 
-        // this does not clear the search results,
-        // but I kinda like that behavior
-        search_el.querySelector("input").value = group;
-        target.blur();
+    content.prepend(search.el);
 
-        history_push_state({ by: "group", value: group });
-    }
-
-    const search_el = el("div", { class: "search", style: "margin-bottom: 1em;" },
-        el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key }),
-        el("div", { class: "results" })
-    );
-
-    if (app_state.filter) {
-        search_el.querySelector("input").value = app_state.filter.value;
-    }
-
-    content.prepend(search_el);
-
-    if (app_el) {
-        app_el = replace(app_el, App(app_state));
-    } else {
-        app_el = App(app_state);
-        content.append(app_el);
-    }
+    app_el = replace(app_el, App(app_state));
 
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
         const group = event.state.group;
-        if (!app_el) return;
         app_el = replace(app_el, App(app_state));
-        search_el.querySelector("input").value = group;
+        search.input_el.value = group;
     });
 }
 
