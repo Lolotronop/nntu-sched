@@ -492,7 +492,7 @@ function parse_full_schedule(groups) {
                 continue;
             }
 
-            let day = parsed_date.data.getDay();
+            let day = (parsed_date.data.getDay() + 6) % 7;
             const week_even = week_number(parsed_date.data) % 2 === 0;
             if (!week_even) day += 7;
 
