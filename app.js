@@ -19,6 +19,8 @@ const ICONS = {
     // return https://lucide.dev/icons/clock-fading
     time_slot: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock-fading"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M12 6v6l4 2"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>`
     ,
+    // https://lucide.dev/icons/star
+    star: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-star preview-icon"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>`,
 
 
     // https://lucide.dev/icons/user-group
@@ -636,7 +638,7 @@ function cache_load_schedule() {
 }
 
 /** 
- * @param {Schedule_Full} schedule 
+ * @param {Schedule_Full} schedule
  * @returns {Cache_Entry}
  */
 function cache_save_schedule(schedule) {
@@ -654,6 +656,34 @@ function cache_save_schedule(schedule) {
     }
 
     return entry;
+}
+
+/**
+ * @param {string} key
+ * @param {any} value
+ */
+function storage_save(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+        console.error("Failed to save to localStorage", e)
+    }
+}
+
+/**
+ * @template T
+ * @param {string} key
+ * @returns {T|null}
+ */
+function storage_load(key) {
+    const value = localStorage.getItem(key);
+    if (!value) return null;
+    try {
+        return JSON.parse(value);
+    } catch (e) {
+        console.error("Failed to parse localStorage", e)
+        return null;
+    }
 }
 
 // ======================
@@ -676,12 +706,26 @@ function history_push_state(filter) {
     window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
 }
 
+
+/**
+ * @typedef Schedule_Filter_By
+ * @type {"group"|"teacher"}
+ */
+
 /**
  * @typedef Schedule_Filter
  * @type {object}
- * @property {"group"|"teacher"} by
+ * @property {Schedule_Filter_By} by
  * @property {string} value
  */
+
+/**
+ * @param {Schedule_Filter} a
+ * @param {Schedule_Filter} b
+ */
+function filter_eq(a, b) {
+    return a.by === b.by && a.value === b.value;
+}
 
 /**
  * @param {string} pathname
@@ -746,16 +790,23 @@ function replace(old, next) {
 /**
  * @param {string} str
  * @param {number} size
+ * @param {string|undefined} color
  * @returns {HTMLDivElement}
  */
-function Icon(str, size) {
+function Icon(str, size = 14, color = undefined) {
     const container = el("div", {
         class: "icon",
         style: `width: ${size}px; height: ${size}px`
     });
-    container.innerHTML = str.trim()
+    let svg = str.trim()
         .replace(`width="24"`, `width="100%"`)
         .replace(`height="24"`, `height="100%"`);
+
+    if (color) {
+        svg = svg.replace(`fill="none"`, `fill="${color}"`)
+            .replace(`stroke="currentColor"`, `stroke="${color}"`)
+    }
+    container.innerHTML = svg
     return container;
 }
 
@@ -928,6 +979,11 @@ function DayCard(day, now) {
  * @returns {HTMLElement}
  */
 function Schedule(days, now) {
+    if (days.map(el => el.lessons.length).reduce((a, b) => a + b, 0) === 0) {
+        return el("div", { class: "schedule" },
+            el("div", { class: "empty" }, "Нет данных")
+        )
+    }
     const day_cards = days.map(el => DayCard(el, now))
     return el("div", { class: "schedule" }, ...day_cards)
 }
@@ -935,10 +991,57 @@ function Schedule(days, now) {
 /**
  * @typedef App_State
  * @type {object}
- * @property {Schedule_Full|null} schedule
- * @property {Schedule_Filter|null} filter
+ * @property {Date} now
+ * @property {Schedule_Full} schedule
+ * @property {Schedule_Weeks} weeks
+ * @property {Schedule_Filter} filter
  * @property {boolean} show_next
+ * @property {Record<Schedule_Filter_By, string[]>} search_arrays used to speed up and make search less annoying
+ *
+ * @property {Schedule_Filter[]} bookmarks
+ *
+ * @property {Cache_Entry|null} cache_entry
+ * @property {"downloading" | "cached" | "failed" } update_state
 */
+
+/**
+ * @param {App_State} app_state
+ * @param {Schedule_Filter} filter
+ */
+function apply_filter(app_state, filter) {
+    app_state.filter = filter;
+    app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
+    history_push_state(app_state.filter);
+    app_state.now = new Date();
+}
+
+
+const BOOKMARK_KEY = "bookmarks";
+
+/**
+ * @param {Schedule_Filter[]} bookmarks
+ * @param {Schedule_Filter} filter
+ */
+function bookmarks_toggle(bookmarks, filter) {
+    const index = bookmarks.findIndex(b => filter_eq(b, filter));
+    if (index === -1) {
+        bookmarks.push(filter);
+    } else {
+        bookmarks.splice(index, 1);
+    }
+    storage_save(BOOKMARK_KEY, bookmarks);
+}
+
+/**
+ * @param {Schedule_Filter[]} bookmarks
+ * @param {Schedule_Filter} filter
+ */
+function bookmarks_remove(bookmarks, filter) {
+    const item = bookmarks.findIndex(b => filter_eq(b, filter))
+    if (item === -1) return;
+    bookmarks.splice(item, 1);
+    storage_save(BOOKMARK_KEY, bookmarks);
+}
 
 
 /**
@@ -964,24 +1067,34 @@ function SelectorButtons(show_next, onselect) {
 }
 
 
+
 /**
- * @param {App_State} app_state 
- * @param {(filter: Schedule_Filter) => void} onselect
+ * @param {Schedule_Full} schedule
+ * @returns 
  */
-function SearchBar(app_state, onselect) {
-    /** @type {Record<Schedule_Filter["by"], string[]>} */
+function resolve_search_arrays(schedule) {
+    /** @type {Record<Schedule_Filter_By, string[]>} */
     const search_arrays = {
         group: [],
         teacher: [],
     }
-    for (const group of app_state.schedule?.groups || []) {
+
+    for (const group of schedule.groups || []) {
         search_arrays.group.push(group.toLowerCase().replace(/-/g, ""));
     }
 
-    for (const teacher of app_state.schedule?.teachers || []) {
+    for (const teacher of schedule.teachers || []) {
         search_arrays.teacher.push(teacher.toLowerCase().replace(/ /g, "").replace(/\./g, ""));
     }
 
+    return search_arrays;
+}
+
+/**
+ * @param {App_State} app_state
+ * @param {() => void} app_rerender
+ */
+function SearchBar(app_state, app_rerender) {
     /** @param {InputEvent|FocusEvent} e  */
     const handle_search_input = (e) => {
         /** @type {HTMLInputElement} */
@@ -996,9 +1109,7 @@ function SearchBar(app_state, onselect) {
             return;
         }
         let matches = 0;
-        const search_by = app_state.filter?.by;
-        if (!search_by) return;
-        const search_array = search_arrays[search_by];
+        const search_array = app_state.search_arrays[app_state.filter.by];
         for (let i = 0; i < search_array.length; i++) {
             const search_element = search_array[i];
             if (search_element.includes(search)) {
@@ -1006,12 +1117,12 @@ function SearchBar(app_state, onselect) {
 
                 /** @type {string} */
                 let value;
-                if (search_by === "group") {
+                if (app_state.filter.by === "group") {
                     value = app_state.schedule.groups[i];
-                } else if (search_by === "teacher") {
+                } else if (app_state.filter.by === "teacher") {
                     value = app_state.schedule.teachers[i];
                 } else {
-                    throw new Error(`Unknown search by ${search_by}`);
+                    throw new Error(`Unknown search by ${app_state.filter.by}`);
                 }
                 const result_el = el("button", { class: "result", onkeydown: handle_search_key }, value);
 
@@ -1022,13 +1133,9 @@ function SearchBar(app_state, onselect) {
                 result_el.onclick = () => {
                     // this does not clear the search results,
                     // but I kinda like that behavior
-                    input_el.value = value;
                     result_el.blur();
-
-                    onselect({
-                        by: search_by,
-                        value,
-                    })
+                    set_filter({ by: app_state.filter.by, value });
+                    app_rerender();
                 }
 
                 results_el.append(result_el);
@@ -1095,41 +1202,58 @@ function SearchBar(app_state, onselect) {
 
     /** @type {Record<Schedule_Filter["by"], HTMLElement>} */
     const filter_types = {
-        group: el("div", { class: "type", onclick: () => set_filter_type("teacher") },
+        group: el("button", { class: "type", onclick: () => set_filter({ by: "teacher", value: "" }) },
             Icon(ICONS.group, 14),
             el("span", {}, "Группа")
         ),
-        teacher: el("div", { class: "type", onclick: () => set_filter_type("group") },
+        teacher: el("button", { class: "type", onclick: () => set_filter({ by: "group", value: "" }) },
             Icon(ICONS.teacher, 14),
             el("span", {}, "Препод")
         )
     }
 
-    /** @param {Schedule_Filter["by"]} type */
-    function set_filter_type(type) {
-        /** @type {Schedule_Filter} */
-        const filter = {
-            by: type,
-            value: "",
-        }
-
-        filter_el = replace(filter_el, filter_types[type]);
-
-        onselect(filter);
+    /** @param {Schedule_Filter} filter */
+    function set_filter(filter) {
+        input_el.value = app_state.filter.value;
+        apply_filter(app_state, filter);
+        app_rerender();
     }
 
     const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
+
+    input_el.value = app_state.filter.value;
+
     const results_el = el("div", { class: "results" });
     let filter_el = filter_types[app_state.filter?.by || "group"];
+
+    let star_icon = Icon(ICONS.star, 18);
+    if (app_state.bookmarks.find(f => filter_eq(f, app_state.filter))) {
+        star_icon = Icon(ICONS.star, 18, "yellow");
+    }
+
 
     const search_el = el("div", { class: "search" },
         el("div", {
             class: "textbox",
-            onclick: () => input_el.focus()
+            onclick: (e) => {
+                if (e.target instanceof HTMLButtonElement) {
+                    return;
+                }
+                input_el.focus()
+            }
         },
-
             Icon(ICONS.search, 18),
             input_el,
+
+            el("button", {
+                class: "save",
+                onclick: () => {
+                    bookmarks_toggle(app_state.bookmarks, app_state.filter);
+                    app_rerender();
+                }
+            },
+                star_icon
+            ),
             filter_el,
         ),
 
@@ -1140,20 +1264,24 @@ function SearchBar(app_state, onselect) {
         input_el.value = app_state.filter.value;
     }
 
-    return {
-        el: search_el,
-        input_el,
-        results_el,
-    }
+    return search_el;
 }
+
+/**
+ * @typedef Schedule_Weeks
+ * @type {object}
+ * @property {Day[]} even
+ * @property {Day[]} odd
+ */
 
 /**
  * 
  * @param {Schedule_Full} schedule
  * @param {Schedule_Filter} filter
  * @param {Date} now
+ * @returns {Schedule_Weeks}
  */
-function resolve_schedule(schedule, filter, now) {
+function resolve_schedule_weeks(schedule, filter, now = new Date()) {
     /** @type Record<string, string> */
     const short_teachers = {};
     /**
@@ -1222,8 +1350,12 @@ function resolve_schedule(schedule, filter, now) {
     }
     even_monday.setDate(even_monday.getDate() + even_monday_offset);
 
-    /** @type {Day[]} */
-    const even_week = [];
+    /** @type {Schedule_Weeks} */
+    const weeks = {
+        even: [],
+        odd: [],
+    }
+
     for (let i = 0; i < 6; i++) {
         const date = new Date(even_monday);
         if (this_week_even) {
@@ -1231,18 +1363,16 @@ function resolve_schedule(schedule, filter, now) {
         } else {
             date.setDate(date.getDate() + i + 14);
         }
-        even_week.push({
+        weeks.even.push({
             date,
             lessons: [],
         })
     }
 
-    /** @type {Day[]} */
-    const odd_week = [];
     for (let i = 0; i < 6; i++) {
         const date = new Date(even_monday);
         date.setDate(date.getDate() + i + 7);
-        odd_week.push({
+        weeks.odd.push({
             date,
             lessons: [],
         })
@@ -1253,29 +1383,19 @@ function resolve_schedule(schedule, filter, now) {
         search_id = schedule.groups.findIndex(el => el === filter.value);
         if (search_id === -1) {
             console.error(`Failed to find group ${filter.value}`)
-            return {
-                odd_week,
-                even_week,
-            }
-
+            return weeks;
         }
     } else if (filter.by === "teacher") {
         search_id = schedule.teachers.findIndex(el => el === filter.value);
         if (search_id === -1) {
             console.error(`Failed to find teacher ${filter.value}`)
-            return {
-                odd_week,
-                even_week,
-            }
+            return weeks;
         }
     }
 
     if (search_id === -1) {
         console.error(`Failed to find search id for ${filter.by} ${filter.value}`)
-        return {
-            odd_week,
-            even_week,
-        }
+        return weeks;
     }
 
     for (const compressed_lesson of schedule.lessons_compressed) {
@@ -1334,7 +1454,7 @@ function resolve_schedule(schedule, filter, now) {
             lesson.groups = [schedule.groups[compressed_lesson.group_id]];
         }
 
-        const week = week_number(date) % 2 === 0 ? even_week : odd_week;
+        const week = week_number(date) % 2 === 0 ? weeks.even : weeks.odd;
         for (const day of week) {
             if (day.date.getTime() === date.getTime()) {
                 day.lessons.push(lesson);
@@ -1352,8 +1472,8 @@ function resolve_schedule(schedule, filter, now) {
             return a.date.getTime() - b.date.getTime();
         })
     }
-    sort_week(odd_week);
-    sort_week(even_week);
+    sort_week(weeks.odd);
+    sort_week(weeks.even);
 
     /** @param {Day[]} week */
     function merge_teacher_lessons(week) {
@@ -1382,66 +1502,153 @@ function resolve_schedule(schedule, filter, now) {
     }
 
     if (filter.by === "teacher") {
-        merge_teacher_lessons(odd_week);
-        merge_teacher_lessons(even_week);
+        merge_teacher_lessons(weeks.odd);
+        merge_teacher_lessons(weeks.even);
     }
 
-    return {
-        odd_week,
-        even_week,
+    return weeks;
+}
+
+/**
+ * @param {Schedule_Filter} filter
+ * @param {App_State} app_state
+ * @param {() => void} rerender
+ */
+function Bookmark(filter, app_state, rerender) {
+    /** @type {ReturnType<typeof Icon>} */
+    let icon;
+    if (filter.by === "group") {
+        icon = Icon(ICONS.group, 18);
+    } else if (filter.by === "teacher") {
+        icon = Icon(ICONS.teacher, 18);
+    } else {
+        icon = Icon(ICONS.unknown, 18)
     }
 
+    const star = Icon(ICONS.star, 18, "yellow");
+
+    return el("div", {
+        class: "item",
+    },
+        el("button", {
+            class: "name",
+            onclick: () => {
+                apply_filter(app_state, filter);
+                rerender();
+            }
+        },
+            icon,
+            el("span", {}, filter.value),
+        ),
+        el("button", {
+            class: "remove", onclick: () => {
+                bookmarks_remove(app_state.bookmarks, filter);
+                rerender();
+            }
+        },
+            star,
+        ),
+    )
+}
+
+/** 
+ * @param {App_State} app_state
+ * @param {() => void} rerender
+ */
+function BookmarksList(app_state, rerender) {
+    if (app_state.bookmarks.length === 0) {
+        return el("div", { class: "hidden" });
+    }
+    return el("div", { class: "saved" },
+        ...app_state.bookmarks.map(s => Bookmark(s, app_state, rerender))
+    );
+}
+
+/**
+ * @param {Date} past
+ * @param {Date} now
+ */
+function time_diff_text(past, now) {
+    const diff = now.getTime() - past.getTime();
+
+    /** @type number */
+    let diff_value;
+    /** @type Intl.RelativeTimeFormatUnit */
+    let diff_unit;
+
+    if (diff < 1000 * 60) {
+        diff_value = Math.round(diff / 1000);
+        diff_unit = "seconds";
+    } else if (diff < 1000 * 60 * 60) {
+        diff_value = Math.round(diff / 1000 / 60);
+        diff_unit = "minutes";
+    } else if (diff < 1000 * 60 * 60 * 24) {
+        diff_value = Math.round(diff / 1000 / 60 / 60);
+        diff_unit = "hours";
+    } else if (diff < 1000 * 60 * 60 * 24 * 7) {
+        diff_value = Math.round(diff / 1000 / 60 / 60 / 24);
+        diff_unit = "days";
+    } else {
+        diff_value = Math.round(diff / 1000 / 60 / 60 / 24 / 7);
+        diff_unit = "weeks";
+    }
+
+    const relative_formatter = new Intl.RelativeTimeFormat("ru", { style: "long" });
+    const ago = relative_formatter.format(-diff_value, diff_unit);
+
+    return ago;
 }
 
 
+
 /**
- * @param {"downloading" | "cached" | "failed" } update_state
- * @param {Date|undefined} last_update_date
- * @param {() => void} onupdate
- * @param {Date} now
+ * @param {App_State} app_state
  */
-function Updater(update_state, last_update_date, onupdate, now = new Date()) {
-    /**
-     * @param {Date} past
-     * @param {Date} now
-     */
-    function time_diff_text(past, now) {
-        const diff = now.getTime() - past.getTime();
+function Updater(app_state) {
+    const { update_state, now } = app_state;
 
-        /** @type number */
-        let diff_value;
-        /** @type Intl.RelativeTimeFormatUnit */
-        let diff_unit;
+    const visual_cache_update = async () => {
+        app_state.update_state = "downloading";
+        self = replace(self, Updater(app_state));
 
-        if (diff < 1000 * 60) {
-            diff_value = Math.round(diff / 1000);
-            diff_unit = "seconds";
-        } else if (diff < 1000 * 60 * 60) {
-            diff_value = Math.round(diff / 1000 / 60);
-            diff_unit = "minutes";
-        } else if (diff < 1000 * 60 * 60 * 24) {
-            diff_value = Math.round(diff / 1000 / 60 / 60);
-            diff_unit = "hours";
-        } else if (diff < 1000 * 60 * 60 * 24 * 7) {
-            diff_value = Math.round(diff / 1000 / 60 / 60 / 24);
-            diff_unit = "days";
-        } else {
-            diff_value = Math.round(diff / 1000 / 60 / 60 / 24 / 7);
-            diff_unit = "weeks";
+        let groups = await get_groups_raw();
+        if (!groups.ok) {
+            app_state.update_state = "failed";
+            self = replace(self, Updater(app_state));
+            console.error("Failed to get groups");
+            return;
         }
 
-        const relative_formatter = new Intl.RelativeTimeFormat("ru", { style: "long" });
-        const ago = relative_formatter.format(-diff_value, diff_unit);
+        const all_schedules_result = await get_all_groups_schedule_raw(groups.data, (count) => {
+            const percent = Math.round(count / groups.data.length * 100);
+            self.progress_el.style.width = `${percent}%`;
+        });
 
-        return ago;
+        if (!all_schedules_result.ok) {
+            app_state.update_state = "failed";
+            self = replace(self, Updater(app_state));
+            return;
+        }
+
+        app_state.schedule = parse_full_schedule(all_schedules_result.data);
+        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
+        app_state.search_arrays = resolve_search_arrays(app_state.schedule);
+        app_state.now = new Date();
+        const entry = cache_save_schedule(app_state.schedule);
+        if (app_state.cache_entry) {
+            localStorage.removeItem(cache_entry_to_string(app_state.cache_entry));
+        }
+        app_state.cache_entry = entry;
+
+        app_state.update_state = "cached";
+        self = replace(self, Updater(app_state));
     }
-
 
     let time_diff;
-    if (last_update_date) {
-        time_diff = time_diff_text(last_update_date, now);
+    if (app_state.cache_entry?.date) {
+        time_diff = time_diff_text(app_state.cache_entry.date, now);
     }
-    const updater_progress_el = el("div", { class: "progress", style: "width: 0%;" });
+    const progress_el = el("div", { class: "progress", style: "width: 0%;" });
 
     let text;
     if (update_state === "downloading") {
@@ -1457,59 +1664,62 @@ function Updater(update_state, last_update_date, onupdate, now = new Date()) {
         text = "Неизвестное состояние";
     }
 
-    const updater_el = el("div", { class: `updater ${update_state}` },
-        updater_progress_el,
+    const self_el = el("div", { class: `updater ${update_state}` },
+        progress_el,
         el("span", {}, text),
-        update_state !== "downloading" && el("button", { onclick: onupdate }, "Обновить"),
+        update_state !== "downloading" && el("button", { onclick: visual_cache_update }, "Обновить"),
     );
 
-    return {
-        el: updater_el,
-        progress_el: updater_progress_el,
-    };
+    let self = {
+        el: self_el,
+        progress_el,
+        update: visual_cache_update,
+    }
+
+    return self;
 }
 
 /**
  * @param {App_State} state
- * @param {Date} now
  */
-function App(state, now = new Date()) {
-    if (!state.schedule) return el("div", {}, "Failed to load schedule");
-    if (!state.filter) return el("div", {}, "Failed to load filter");
-
-    const { odd_week, even_week } = resolve_schedule(state.schedule, state.filter, now);
-
+function App(state) {
     /** @type {Day[]} */
     let current_week;
     /** @type {Day[]} */
     let next_week;
 
-    if (week_number(now) % 2 === 0) {
-        current_week = even_week;
-        next_week = odd_week;
+    if (week_number(state.now) % 2 === 0) {
+        current_week = state.weeks.even;
+        next_week = state.weeks.odd;
     } else {
-        current_week = odd_week;
-        next_week = even_week;
+        current_week = state.weeks.even;
+        next_week = state.weeks.odd;
     }
 
-    const current_week_el = Schedule(current_week, now);
-    const next_week_el = Schedule(next_week, now);
+    const current_week_el = Schedule(current_week, state.now);
+    const next_week_el = Schedule(next_week, state.now);
 
     let selected_week_el = state.show_next ? next_week_el : current_week_el;
 
     /** @type {(show_next: boolean) => void} */
-    const handle_change = (updated_show_next) => {
+    const handle_week_select = (updated_show_next) => {
         state.show_next = updated_show_next;
         const new_week_el = state.show_next ? next_week_el : current_week_el;
         selected_week_el = replace(selected_week_el, new_week_el);
 
-        const new_buttons_el = SelectorButtons(state.show_next, handle_change)
+        const new_buttons_el = SelectorButtons(state.show_next, handle_week_select)
         buttons_el = replace(buttons_el, new_buttons_el);
     }
 
-    let buttons_el = SelectorButtons(state.show_next, handle_change);
+    let buttons_el = SelectorButtons(state.show_next, handle_week_select);
+
+    const rerender = () => {
+        self = replace(self, App(state));
+    }
 
     let self = el("div", { class: "flex-col gap-4", style: "width: 100%;" },
+        SearchBar(state, rerender),
+        BookmarksList(state, rerender),
         selected_week_el,
         buttons_el,
     );
@@ -1527,101 +1737,65 @@ async function main() {
         return;
     }
 
-    /** @type {ReturnType<typeof Updater>} */
-    let updater = {
-        el: el("div", { style: "display: none;" }),
-        progress_el: el("div", {}),
+    /** @type {App_State} */
+    let app_state = {
+        schedule: {
+            lessons_compressed: [],
+            subjects: [],
+            teachers: [],
+            rooms: [],
+            types: [],
+            groups: [],
+            time_slots: [],
+        },
+        filter: { by: "group", value: "" },
+        show_next: false,
+        weeks: {
+            even: [],
+            odd: [],
+        },
+        search_arrays: {
+            group: [],
+            teacher: [],
+        },
+        bookmarks: [],
+        cache_entry: null,
+        update_state: "downloading",
+        now: new Date(),
     };
+
+    app_state.filter = schedule_filter_from_pathname(window.location.pathname) ?? { by: "group", value: "" };
+    app_state.bookmarks = storage_load(BOOKMARK_KEY) ?? [];
+
+    let updater = Updater(app_state);
     content.append(updater.el);
 
-    /** @type {ReturnType<typeof SearchBar>} */
-    let search = {
-        el: el("div", { style: "display: none;" }),
-        input_el: el("input", {}),
-        results_el: el("div", {}),
-    }
-    content.append(search.el);
-    /**
-     * @param {Schedule_Filter} filter 
-     */
-    function onsearch(filter) {
-        app_state.filter = filter;
-        history_push_state(app_state.filter);
-        schedule_el = replace(schedule_el, App(app_state));
-    }
+    let app_el = App(app_state);
+    content.append(app_el);
 
-    /** @type {App_State} */
-    let app_state = { schedule: null, show_next: false, filter: null };
-    let schedule_el = el("div", {});
-    content.append(schedule_el);
-
-    app_state.filter = schedule_filter_from_pathname(window.location.pathname);
-    if (app_state.filter) {
-        history_push_state(app_state.filter);
-    }
 
     let cache = cache_load_schedule();
     let should_update = true;
 
     if (cache) {
         app_state.schedule = cache.schedule;
-        schedule_el = replace(schedule_el, App(app_state));
+        app_state.cache_entry = cache.entry;
+        app_state.update_state = "cached";
+
+        app_state.search_arrays = resolve_search_arrays(cache.schedule);
+        app_state.weeks = resolve_schedule_weeks(cache.schedule, app_state.filter);
+
+        app_el = replace(app_el, App(app_state));
+        updater = replace(updater, Updater(app_state));
 
         const now = new Date();
         const time_since_update = now.getTime() - cache.entry.date.getTime();
         should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
-
-        updater = replace(updater, Updater("cached", cache.entry.date, update_cache));
-        search = replace(search, SearchBar(app_state, onsearch));
-
-        schedule_el = replace(schedule_el, App(app_state));
-
-    }
-
-    async function update_cache() {
-        updater = replace(updater, Updater("downloading", undefined, update_cache));
-
-        let groups = await get_groups_raw();
-        if (!groups.ok) {
-            updater = replace(updater, Updater("failed", undefined, update_cache));
-            console.error("Failed to get groups");
-            return;
-        }
-
-        const all_schedules_result = await get_all_groups_schedule_raw(groups.data, (count) => {
-            const percent = Math.round(count / groups.data.length * 100);
-            updater.progress_el.style.width = `${percent}%`;
-        });
-
-        if (!all_schedules_result.ok) {
-            updater = replace(updater, Updater("failed", undefined, update_cache));
-            return;
-        }
-
-        app_state.schedule = parse_full_schedule(all_schedules_result.data);
-        const entry = cache_save_schedule(app_state.schedule);
-        if (cache) {
-            localStorage.removeItem(cache_entry_to_string(cache.entry));
-        }
-
-        cache = {
-            entry,
-            schedule: app_state.schedule,
-        }
-
-        updater = replace(updater, Updater("cached", undefined, update_cache));
-        search = replace(search, SearchBar(app_state, onsearch));
-
-        schedule_el = replace(schedule_el, App(app_state));
     }
 
     if (should_update) {
-        await update_cache();
-    }
-
-    if (!app_state.schedule) {
-        console.error("Failed to load schedule");
-        return;
+        await updater.update();
+        app_el = replace(app_el, App(app_state));
     }
 
     window.addEventListener("popstate", (event) => {
@@ -1633,8 +1807,9 @@ async function main() {
             return;
         }
         app_state.filter = history_state.filter;
-        schedule_el = replace(schedule_el, App(app_state));
-        search.input_el.value = app_state.filter.value;
+        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
+        app_state.now = new Date();
+        app_el = replace(app_el, App(app_state));
     });
 }
 

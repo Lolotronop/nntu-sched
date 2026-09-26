@@ -32,6 +32,18 @@ body {
     flex-direction: column;
 }
 
+button {
+    cursor: pointer;
+    background-color: inherit;
+    color: inherit;
+    border: none;
+    border-radius: var(--radius);
+
+    &:hover {
+        background-color: var(--accent-bg);
+    }
+}
+
 #content {
     max-width: 100%;
     width: 620px;
@@ -69,12 +81,9 @@ body {
 
     button {
         background-color: var(--accent-bg);
-        color: var(--text-fg);
-        border: none;
         border-radius: var(--radius);
         height: 100%;
         padding: 0 0.5em;
-        cursor: pointer;
     }
 
     .progress {
@@ -130,9 +139,19 @@ body {
             align-items: center;
             gap: 0.25em;
         }
+
+        .save {
+            display: flex;
+            align-items: center;
+            padding: 0.5em;
+
+            &:hover {
+                background-color: var(--accent-bg);
+            }
+        }
     }
 
-    &:focus-within:has(input:not(:placeholder-shown)) .results {
+    &:focus-within:has(input:not(:placeholder-shown)):not(:has(button.save:focus)) .results {
         display: flex;
     }
 
@@ -153,15 +172,45 @@ body {
         .result {
             padding: 0.75em;
             background-color: var(--card-bg);
-            border: none;
-            border-radius: var(--radius);
-            cursor: pointer;
-            color: var(--text-fg);
             position: relative;
             text-align: left;
             outline: none;
 
             &:focus {
+                background-color: var(--accent-bg);
+            }
+        }
+    }
+}
+
+.saved {
+    background-color: var(--card-bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+
+    :last-child {
+        border-bottom: none !important;
+    }
+
+    .item {
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+
+        .name {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            padding: 0.75em 0.5em;
+            gap: 0.25em;
+        }
+
+        .remove {
+            display: flex;
+            align-items: center;
+            padding: 0.75em;
+
+            &:hover {
                 background-color: var(--accent-bg);
             }
         }
@@ -271,19 +320,13 @@ body {
         width: 100%;
         padding: 0.75em 0;
         background-color: var(--card-bg);
-        color: var(--text-fg);
-        border-radius: var(--radius);
         border: 1px solid var(--border);
-        cursor: pointer;
 
         &.selected {
             border: none;
             background-color: var(--accent-bg);
         }
     }
-
-    /* button.selected { */
-    /* } */
 }
 
 .loading-bar {
