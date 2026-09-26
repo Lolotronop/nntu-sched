@@ -124,6 +124,12 @@ body {
             outline: none;
             border: none;
         }
+
+        .type {
+            display: flex;
+            align-items: center;
+            gap: 0.25em;
+        }
     }
 
     &:focus-within:has(input:not(:placeholder-shown)) .results {

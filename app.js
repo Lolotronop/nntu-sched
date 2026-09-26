@@ -20,6 +20,10 @@ const ICONS = {
     time_slot: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock-fading"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="M12 6v6l4 2"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>`
     ,
 
+
+    // https://lucide.dev/icons/user-group
+    group: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user-group preview-icon"><path d="M17 21v-1a2 2 0 00-2-2H9a2 2 0 00-2 2v1"/><path d="M19 10h1a2 2 0 012 2v1"/><path d="M5 10H4a2 2 0 00-2 2v1"/><circle cx="12" cy="11" r="3"/><circle cx="18" cy="4" r="2"/><circle cx="6" cy="4" r="2"/></svg>`,
+
     // https://lucide.dev/icons/circle-user
     teacher: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-user"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>`
     ,
@@ -264,7 +268,7 @@ function parse_time_slot(slots) {
  * @property {string|null} description
  * @property {Time_Slot} time_slot
  * @property {number} time_slot_index
- * @property {string} group
+ * @property {string[]} groups
  * @property {Date} date
 */
 
@@ -675,7 +679,7 @@ function history_push_state(filter) {
 /**
  * @typedef Schedule_Filter
  * @type {object}
- * @property {"group"} by
+ * @property {"group"|"teacher"} by
  * @property {string} value
  */
 
@@ -688,7 +692,7 @@ function schedule_filter_from_pathname(pathname) {
     if (parts.length < 2) return null;
     while (parts[0] === "") { parts.shift(); }
     const [by, value_str] = parts;
-    if (by !== "group") return null;
+    if (by !== "group" && by !== "teacher") return null;
     const value = decodeURIComponent(value_str);
     return { by, value };
 }
@@ -856,6 +860,14 @@ function LessonCard(lesson) {
                 el("span", { title: lesson.teacher_full }, !!lesson.teacher_short && lesson.teacher_short.length > 0 ? lesson.teacher_short : lesson.teacher_full)
             ),
         ),
+
+        lesson.groups.length > 0 &&
+        el("div", { class: "flex-row gap-1" },
+            el("div", { style: "padding-top: 0.25em;" }, Icon(ICONS.group, 14)),
+            el("div", { class: "flex-col gap-2" },
+                ...lesson.groups.map(group => el("span", {}, group))
+            ),
+        ),
     );
 }
 
@@ -957,10 +969,17 @@ function SelectorButtons(show_next, onselect) {
  * @param {(filter: Schedule_Filter) => void} onselect
  */
 function SearchBar(app_state, onselect) {
-    /** @type {string[]} */
-    const search_groups = [];
+    /** @type {Record<Schedule_Filter["by"], string[]>} */
+    const search_arrays = {
+        group: [],
+        teacher: [],
+    }
     for (const group of app_state.schedule?.groups || []) {
-        search_groups.push(group.toLowerCase().replace(/-/g, ""));
+        search_arrays.group.push(group.toLowerCase().replace(/-/g, ""));
+    }
+
+    for (const teacher of app_state.schedule?.teachers || []) {
+        search_arrays.teacher.push(teacher.toLowerCase().replace(/ /g, "").replace(/\./g, ""));
     }
 
     /** @param {InputEvent|FocusEvent} e  */
@@ -977,30 +996,42 @@ function SearchBar(app_state, onselect) {
             return;
         }
         let matches = 0;
-        for (let i = 0; i < search_groups.length; i++) {
-            const group_search = search_groups[i];
-            if (group_search.includes(search)) {
+        const search_by = app_state.filter?.by;
+        if (!search_by) return;
+        const search_array = search_arrays[search_by];
+        for (let i = 0; i < search_array.length; i++) {
+            const search_element = search_array[i];
+            if (search_element.includes(search)) {
                 if (!app_state.schedule) return;
-                const group = app_state.schedule.groups[i];
-                const group_el = el("button", { class: "result", onkeydown: handle_search_key }, group);
 
-                group_el.onmouseenter = () => {
-                    group_el.focus();
+                /** @type {string} */
+                let value;
+                if (search_by === "group") {
+                    value = app_state.schedule.groups[i];
+                } else if (search_by === "teacher") {
+                    value = app_state.schedule.teachers[i];
+                } else {
+                    throw new Error(`Unknown search by ${search_by}`);
+                }
+                const result_el = el("button", { class: "result", onkeydown: handle_search_key }, value);
+
+                result_el.onmouseenter = () => {
+                    result_el.focus();
                 }
 
-                group_el.onclick = () => {
+                result_el.onclick = () => {
                     // this does not clear the search results,
                     // but I kinda like that behavior
-                    input_el.value = group;
-                    group_el.blur();
+                    input_el.value = value;
+                    result_el.blur();
 
                     onselect({
-                        by: "group",
-                        value: group,
+                        by: search_by,
+                        value,
                     })
                 }
 
-                results_el.append(group_el);
+                results_el.append(result_el);
                 matches++;
             }
         }
@@ -1062,8 +1093,34 @@ function SearchBar(app_state, onselect) {
         }
     }
 
+    /** @type {Record<Schedule_Filter["by"], HTMLElement>} */
+    const filter_types = {
+        group: el("div", { class: "type", onclick: () => set_filter_type("teacher") },
+            Icon(ICONS.group, 14),
+            el("span", {}, "Группа")
+        ),
+        teacher: el("div", { class: "type", onclick: () => set_filter_type("group") },
+            Icon(ICONS.teacher, 14),
+            el("span", {}, "Препод")
+        )
+    }
+
+    /** @param {Schedule_Filter["by"]} type */
+    function set_filter_type(type) {
+        /** @type {Schedule_Filter} */
+        const filter = {
+            by: type,
+            value: "",
+        }
+
+        filter_el = replace(filter_el, filter_types[type]);
+
+        onselect(filter);
+    }
+
     const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
     const results_el = el("div", { class: "results" });
+    let filter_el = filter_types[app_state.filter?.by || "group"];
 
     const search_el = el("div", { class: "search" },
         el("div", {
@@ -1073,6 +1130,7 @@ function SearchBar(app_state, onselect) {
 
             Icon(ICONS.search, 18),
             input_el,
+            filter_el,
         ),
 
         results_el
@@ -1099,10 +1157,11 @@ function resolve_schedule(schedule, filter, now) {
     /** @type Record<string, string> */
     const short_teachers = {};
     /**
-     * @param {string} input
+     * @param {string|undefined} input
      * @returns {string|null}
      */
     function shorten_teacher(input) {
+        if (input === undefined) return null;
         if (input.length === 0) return null;
         const parts = input.split(" ")
         if (parts.length !== 3) return null;
@@ -1123,10 +1182,11 @@ function resolve_schedule(schedule, filter, now) {
      * with parsed fields like campus, remote, etc
      * this way I will be able to show different icons
      * for this more reliably for example
-     * @param {string} input
+     * @param {string|undefined} input
      * @returns {string|null}
      */
     function shorten_room(input) {
+        if (input === undefined) return null;
         if (input.length === 0) return null;
         const common_regex = /\d\d\d\d \(Уч\. корп\. .\d/;
         if (common_regex.test(input)) {
@@ -1188,14 +1248,43 @@ function resolve_schedule(schedule, filter, now) {
         })
     }
 
+    let search_id = -1;
+    if (filter.by === "group") {
+        search_id = schedule.groups.findIndex(el => el === filter.value);
+        if (search_id === -1) {
+            console.error(`Failed to find group ${filter.value}`)
+            return {
+                odd_week,
+                even_week,
+            }
+
+        }
+    } else if (filter.by === "teacher") {
+        search_id = schedule.teachers.findIndex(el => el === filter.value);
+        if (search_id === -1) {
+            console.error(`Failed to find teacher ${filter.value}`)
+            return {
+                odd_week,
+                even_week,
+            }
+        }
+    }
+
+    if (search_id === -1) {
+        console.error(`Failed to find search id for ${filter.by} ${filter.value}`)
+        return {
+            odd_week,
+            even_week,
+        }
+    }
+
     for (const compressed_lesson of schedule.lessons_compressed) {
         if (filter.by === "group") {
-            const group_id = schedule.groups.findIndex(el => el === filter.value);
-            if (group_id === -1) {
-                console.error(`Failed to find group ${filter.value}`)
+            if (compressed_lesson.group_id !== search_id) {
                 continue;
             }
-            if (compressed_lesson.group_id !== group_id) {
+        } else if (filter.by === "teacher") {
+            if (compressed_lesson.teacher_id !== search_id) {
                 continue;
             }
         }
@@ -1228,7 +1317,7 @@ function resolve_schedule(schedule, filter, now) {
 
         /** @type {Lesson} */
         const lesson = {
-            group: schedule.groups[compressed_lesson.group_id],
+            groups: [],
             time_slot: schedule.time_slots[compressed_lesson.time_slot_id],
             time_slot_index: compressed_lesson.time_slot_id,
             subject: schedule.subjects[compressed_lesson.subject_id],
@@ -1241,6 +1330,10 @@ function resolve_schedule(schedule, filter, now) {
             description: compressed_lesson.description,
         }
 
+        if (filter.by !== "group") {
+            lesson.groups = [schedule.groups[compressed_lesson.group_id]];
+        }
+
         const week = week_number(date) % 2 === 0 ? even_week : odd_week;
         for (const day of week) {
             if (day.date.getTime() === date.getTime()) {
@@ -1248,6 +1341,49 @@ function resolve_schedule(schedule, filter, now) {
                 break;
             }
         }
+    }
+
+    /** @param {Day[]} week */
+    function sort_week(week) {
+        week.forEach(day => day.lessons.sort((a, b) => {
+            return a.time_slot_index - b.time_slot_index;
+        }))
+        week.sort((a, b) => {
+            return a.date.getTime() - b.date.getTime();
+        })
+    }
+    sort_week(odd_week);
+    sort_week(even_week);
+
+    /** @param {Day[]} week */
+    function merge_teacher_lessons(week) {
+        for (const day of week) {
+            const new_lessons = [];
+            for (const lesson of day.lessons) {
+                if (new_lessons.length === 0) {
+                    new_lessons.push(lesson);
+                    continue;
+                }
+
+                const same_lesson = new_lessons.find(el => {
+                    return el.time_slot_index === lesson.time_slot_index
+                        && el.room === lesson.room
+                })
+
+                if (!same_lesson) {
+                    new_lessons.push(lesson);
+                    continue;
+                }
+
+                same_lesson.groups.push(...lesson.groups);
+            }
+            day.lessons = new_lessons;
+        }
+    }
+
+    if (filter.by === "teacher") {
+        merge_teacher_lessons(odd_week);
+        merge_teacher_lessons(even_week);
     }
 
     return {
@@ -1409,8 +1545,8 @@ async function main() {
      * @param {Schedule_Filter} filter 
      */
     function onsearch(filter) {
-        history_push_state(filter);
         app_state.filter = filter;
+        history_push_state(app_state.filter);
         schedule_el = replace(schedule_el, App(app_state));
     }
 
@@ -1423,12 +1559,6 @@ async function main() {
     if (app_state.filter) {
         history_push_state(app_state.filter);
     }
-
-    if (!app_state.filter) {
-        app_state.filter = { by: "group", value: "М26-ИСТ-3" };
-        history_push_state(app_state.filter);
-    }
-
 
     let cache = cache_load_schedule();
     let should_update = true;
