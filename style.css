@@ -120,10 +120,6 @@ button {
         align-items: center;
         padding: 0 0.5em;
 
-        &:focus-within {
-            border-color: var(--accent);
-        }
-
         input {
             padding: 0.5em;
             width: 100%;
@@ -151,8 +147,14 @@ button {
         }
     }
 
-    &:focus-within:has(input:not(:placeholder-shown)):not(:has(button.save:focus)) .results {
-        display: flex;
+    &:focus-within:has(input:not(:placeholder-shown)):not(:has(button.save:focus), :has(button.type:focus)) {
+        .textbox {
+            border-color: var(--accent) !important;
+        }
+
+        .results {
+            display: flex;
+        }
     }
 
     .results {
