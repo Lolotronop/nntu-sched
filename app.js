@@ -41,7 +41,10 @@ const ICONS = {
     ,
 
     // https://lucide.dev/icons/badge-question-mark
-    unknown: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-badge-question-mark"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`
+    unknown: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-badge-question-mark"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>`,
+
+    // https://lucide.dev/icons/search
+    search: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search preview-icon"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>`,
 };
 
 /**
@@ -1049,6 +1052,8 @@ function SearchBar(app_state, onselect) {
                 first.click();
             }
 
+            input_el.blur();
+
             return;
         }
 
@@ -1059,8 +1064,17 @@ function SearchBar(app_state, onselect) {
 
     const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
     const results_el = el("div", { class: "results" });
+
     const search_el = el("div", { class: "search" },
-        input_el,
+        el("div", {
+            class: "textbox",
+            onclick: () => input_el.focus()
+        },
+
+            Icon(ICONS.search, 18),
+            input_el,
+        ),
+
         results_el
     );
 
@@ -1391,6 +1405,14 @@ async function main() {
         results_el: el("div", {}),
     }
     content.append(search.el);
+    /**
+     * @param {Schedule_Filter} filter 
+     */
+    function onsearch(filter) {
+        history_push_state(filter);
+        app_state.filter = filter;
+        schedule_el = replace(schedule_el, App(app_state));
+    }
 
     /** @type {App_State} */
     let app_state = { schedule: null, show_next: false, filter: null };
@@ -1420,6 +1442,10 @@ async function main() {
         should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
 
         updater = replace(updater, Updater("cached", cache.entry.date, update_cache));
+        search = replace(search, SearchBar(app_state, onsearch));
+
+        schedule_el = replace(schedule_el, App(app_state));
+
     }
 
     async function update_cache() {
@@ -1454,6 +1480,9 @@ async function main() {
         }
 
         updater = replace(updater, Updater("cached", undefined, update_cache));
+        search = replace(search, SearchBar(app_state, onsearch));
+
+        schedule_el = replace(schedule_el, App(app_state));
     }
 
     if (should_update) {
@@ -1464,16 +1493,6 @@ async function main() {
         console.error("Failed to load schedule");
         return;
     }
-
-    search = replace(search,
-        SearchBar(app_state, (filter) => {
-            history_push_state(filter);
-            app_state.filter = filter;
-            schedule_el = replace(schedule_el, App(app_state));
-        })
-    );
-
-    schedule_el = replace(schedule_el, App(app_state));
 
     window.addEventListener("popstate", (event) => {
         if (!event.state) return;
