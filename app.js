@@ -1510,8 +1510,8 @@ function App(state, now = new Date()) {
     let buttons_el = SelectorButtons(state.show_next, handle_change);
 
     let self = el("div", { class: "flex-col gap-4", style: "width: 100%;" },
+        selected_week_el,
         buttons_el,
-        selected_week_el
     );
 
     return self;
