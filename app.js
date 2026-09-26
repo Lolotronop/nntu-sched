@@ -1717,7 +1717,7 @@ function App(state) {
         self = replace(self, App(state));
     }
 
-    let self = el("div", { class: "flex-col gap-4", style: "width: 100%;" },
+    let self = el("div", { class: "flex-col gap-6", style: "width: 100%;" },
         SearchBar(state, rerender),
         BookmarksList(state, rerender),
         selected_week_el,
