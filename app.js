@@ -669,6 +669,35 @@ function history_push_state(filter) {
     window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
 }
 
+/**
+ * @typedef Schedule_Filter
+ * @type {object}
+ * @property {"group"} by
+ * @property {string} value
+ */
+
+/**
+ * @param {string} pathname
+ * @returns {Schedule_Filter|null}
+ */
+function schedule_filter_from_pathname(pathname) {
+    const parts = pathname.split("/");
+    if (parts.length < 2) return null;
+    while (parts[0] === "") { parts.shift(); }
+    const [by, value_str] = parts;
+    if (by !== "group") return null;
+    const value = decodeURIComponent(value_str);
+    return { by, value };
+}
+
+/**
+ * @param {Schedule_Filter} filter
+ * @returns {string}
+ */
+function schedule_filter_to_pathname(filter) {
+    return `/${filter.by}/${encodeURIComponent(filter.value)}`;
+}
+
 
 // ======================
 // ======== UI ==========
@@ -679,26 +708,32 @@ function history_push_state(filter) {
  * @template {keyof HTMLElementTagNameMap} K
  * @param {K} type
  * @param {Partial<Omit<HTMLElementTagNameMap[K], "style">> & { class?: string, style?: string }} options
- * @param {(Node|string)[]} children
+ * @param {(Node|string|boolean)[]} children
  * @returns {HTMLElementTagNameMap[K]}
  */
 function el(type, options, ...children) {
     const el = document.createElement(type)
     if (options.class) el.className = options.class;
     Object.assign(el, options);
-    el.append(...children)
+    el.append(...children.filter(el => el instanceof Node || typeof el === "string"));
     return el
 }
 
 /**
- * @template {HTMLElement} T
- * @param {T} old_el
- * @param {T} new_el
+ * @template {HTMLElement|{el: HTMLElement}} T
+ * @param {T} old
+ * @param {T} next
  * @returns {T}
  */
-function replace(old_el, new_el) {
-    old_el.replaceWith(new_el);
-    return new_el;
+function replace(old, next) {
+    if (typeof old === "object" && "el" in old
+        && typeof next === "object" && "el" in next) {
+        old.el.replaceWith(next.el);
+    } else if (old instanceof HTMLElement && next instanceof HTMLElement) {
+        old.replaceWith(next);
+    }
+
+    return next;
 }
 
 /**
@@ -824,9 +859,10 @@ function LessonCard(lesson) {
 /**
  * @param {Date} date
  * @param {boolean} has_lessons
+ * @param {Date} now
  * @returns {HTMLElement}
  */
-function DayHeader(date, has_lessons) {
+function DayHeader(date, has_lessons, now) {
     let weekday = new Intl.DateTimeFormat("ru-RU", {
         weekday: "long",
     }).format(date);
@@ -838,7 +874,6 @@ function DayHeader(date, has_lessons) {
     }).format(date);
     date_str = `, ${date_str}`
 
-    const now = new Date();
     const is_today = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
 
     const header_class = is_today ? "header today" : "header"
@@ -860,10 +895,11 @@ function DayHeader(date, has_lessons) {
 
 /**
  * @param {Day} day
+ * @param {Date} now
  * @returns {HTMLElement}
  */
-function DayCard(day) {
-    const header = DayHeader(day.date, day.lessons.length > 0)
+function DayCard(day, now) {
+    const header = DayHeader(day.date, day.lessons.length > 0, now)
     const lesson_cards = day.lessons.map(l => LessonCard(l))
     return el("div", { class: "day" },
         header,
@@ -873,40 +909,12 @@ function DayCard(day) {
 
 /**
  * @param {Day[]} days
+ * @param {Date} now
  * @returns {HTMLElement}
  */
-function Schedule(days) {
-    const day_cards = days.map(el => DayCard(el))
+function Schedule(days, now) {
+    const day_cards = days.map(el => DayCard(el, now))
     return el("div", { class: "schedule" }, ...day_cards)
-}
-
-/**
- * @typedef Schedule_Filter
- * @type {object}
- * @property {"group"} by
- * @property {string} value
- */
-
-/**
- * @param {string} pathname
- * @returns {Schedule_Filter|null}
- */
-function schedule_filter_from_pathname(pathname) {
-    const parts = pathname.split("/");
-    if (parts.length < 2) return null;
-    while (parts[0] === "") { parts.shift(); }
-    const [by, value_str] = parts;
-    if (by !== "group") return null;
-    const value = decodeURIComponent(value_str);
-    return { by, value };
-}
-
-/**
- * @param {Schedule_Filter} filter
- * @returns {string}
- */
-function schedule_filter_to_pathname(filter) {
-    return `/${filter.by}/${encodeURIComponent(filter.value)}`;
 }
 
 /**
@@ -1051,7 +1059,7 @@ function SearchBar(app_state, onselect) {
 
     const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
     const results_el = el("div", { class: "results" });
-    const search_el = el("div", { class: "search", style: "margin-bottom: 1em;" },
+    const search_el = el("div", { class: "search" },
         input_el,
         results_el
     );
@@ -1068,19 +1076,12 @@ function SearchBar(app_state, onselect) {
 }
 
 /**
- * @param {App_State} state
+ * 
+ * @param {Schedule_Full} schedule
+ * @param {Schedule_Filter} filter
+ * @param {Date} now
  */
-function App(state) {
-    const group = state.filter?.value;
-
-    const schedule = state.schedule;
-    if (!schedule) return el("div", {}, "Failed to load schedule");
-    const group_id = schedule.groups.findIndex(el => el === group);
-    if (group_id === -1) {
-        console.error(`Failed to find group ${group}`)
-        return el("div", {}, "Failed to find group");
-    }
-
+function resolve_schedule(schedule, filter, now) {
     /** @type Record<string, string> */
     const short_teachers = {};
     /**
@@ -1130,7 +1131,6 @@ function App(state) {
         return null;
     }
 
-    const now = new Date();
     now.setHours(0, 0, 0, 0);
     let this_week_no = week_number(now);
     const this_week_even = this_week_no % 2 === 0;
@@ -1175,8 +1175,15 @@ function App(state) {
     }
 
     for (const compressed_lesson of schedule.lessons_compressed) {
-        if (compressed_lesson.group_id !== group_id) {
-            continue;
+        if (filter.by === "group") {
+            const group_id = schedule.groups.findIndex(el => el === filter.value);
+            if (group_id === -1) {
+                console.error(`Failed to find group ${filter.value}`)
+                continue;
+            }
+            if (compressed_lesson.group_id !== group_id) {
+                continue;
+            }
         }
 
         /** @type {string|null} */
@@ -1229,6 +1236,99 @@ function App(state) {
         }
     }
 
+    return {
+        odd_week,
+        even_week,
+    }
+
+}
+
+
+/**
+ * @param {"downloading" | "cached" | "failed" } update_state
+ * @param {Date|undefined} last_update_date
+ * @param {() => void} onupdate
+ * @param {Date} now
+ */
+function Updater(update_state, last_update_date, onupdate, now = new Date()) {
+    /**
+     * @param {Date} past
+     * @param {Date} now
+     */
+    function time_diff_text(past, now) {
+        const diff = now.getTime() - past.getTime();
+
+        /** @type number */
+        let diff_value;
+        /** @type Intl.RelativeTimeFormatUnit */
+        let diff_unit;
+
+        if (diff < 1000 * 60) {
+            diff_value = Math.round(diff / 1000);
+            diff_unit = "seconds";
+        } else if (diff < 1000 * 60 * 60) {
+            diff_value = Math.round(diff / 1000 / 60);
+            diff_unit = "minutes";
+        } else if (diff < 1000 * 60 * 60 * 24) {
+            diff_value = Math.round(diff / 1000 / 60 / 60);
+            diff_unit = "hours";
+        } else if (diff < 1000 * 60 * 60 * 24 * 7) {
+            diff_value = Math.round(diff / 1000 / 60 / 60 / 24);
+            diff_unit = "days";
+        } else {
+            diff_value = Math.round(diff / 1000 / 60 / 60 / 24 / 7);
+            diff_unit = "weeks";
+        }
+
+        const relative_formatter = new Intl.RelativeTimeFormat("ru", { style: "long" });
+        const ago = relative_formatter.format(-diff_value, diff_unit);
+
+        return ago;
+    }
+
+
+    let time_diff;
+    if (last_update_date) {
+        time_diff = time_diff_text(last_update_date, now);
+    }
+    const updater_progress_el = el("div", { class: "progress", style: "width: 0%;" });
+
+    let text;
+    if (update_state === "downloading") {
+        text = "Загрузка расписания...";
+    } else if (update_state === "cached") {
+        text = "Расписание загружено";
+        if (time_diff) {
+            text += ` ${time_diff}`;
+        }
+    } else if (update_state === "failed") {
+        text = "Ошибка загрузки";
+    } else {
+        text = "Неизвестное состояние";
+    }
+
+    const updater_el = el("div", { class: `updater ${update_state}` },
+        updater_progress_el,
+        el("span", {}, text),
+        update_state !== "downloading" && el("button", { onclick: onupdate }, "Обновить"),
+    );
+
+    return {
+        el: updater_el,
+        progress_el: updater_progress_el,
+    };
+}
+
+/**
+ * @param {App_State} state
+ * @param {Date} now
+ */
+function App(state, now = new Date()) {
+    if (!state.schedule) return el("div", {}, "Failed to load schedule");
+    if (!state.filter) return el("div", {}, "Failed to load filter");
+
+    const { odd_week, even_week } = resolve_schedule(state.schedule, state.filter, now);
+
     /** @type {Day[]} */
     let current_week;
     /** @type {Day[]} */
@@ -1242,8 +1342,8 @@ function App(state) {
         next_week = even_week;
     }
 
-    const current_week_el = Schedule(current_week)
-    const next_week_el = Schedule(next_week)
+    const current_week_el = Schedule(current_week, now);
+    const next_week_el = Schedule(next_week, now);
 
     let selected_week_el = state.show_next ? next_week_el : current_week_el;
 
@@ -1277,6 +1377,21 @@ async function main() {
         return;
     }
 
+    /** @type {ReturnType<typeof Updater>} */
+    let updater = {
+        el: el("div", { style: "display: none;" }),
+        progress_el: el("div", {}),
+    };
+    content.append(updater.el);
+
+    /** @type {ReturnType<typeof SearchBar>} */
+    let search = {
+        el: el("div", { style: "display: none;" }),
+        input_el: el("input", {}),
+        results_el: el("div", {}),
+    }
+    content.append(search.el);
+
     /** @type {App_State} */
     let app_state = { schedule: null, show_next: false, filter: null };
     let schedule_el = el("div", {});
@@ -1303,28 +1418,27 @@ async function main() {
         const now = new Date();
         const time_since_update = now.getTime() - cache.entry.date.getTime();
         should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
+
+        updater = replace(updater, Updater("cached", cache.entry.date, update_cache));
     }
 
-    if (should_update) {
-        const loading_bar_inner = el("div", { class: "loading-bar-inner" });
-        const loading_bar = el("div", { class: "loading-bar" }, loading_bar_inner);
-        loading_bar_inner.style.width = "0%";
-
-        content.prepend(loading_bar);
+    async function update_cache() {
+        updater = replace(updater, Updater("downloading", undefined, update_cache));
 
         let groups = await get_groups_raw();
         if (!groups.ok) {
+            updater = replace(updater, Updater("failed", undefined, update_cache));
             console.error("Failed to get groups");
             return;
         }
 
         const all_schedules_result = await get_all_groups_schedule_raw(groups.data, (count) => {
             const percent = Math.round(count / groups.data.length * 100);
-            loading_bar_inner.style.width = `${percent}%`;
+            updater.progress_el.style.width = `${percent}%`;
         });
 
         if (!all_schedules_result.ok) {
-            console.error("Failed to get all schedules", all_schedules_result.err)
+            updater = replace(updater, Updater("failed", undefined, update_cache));
             return;
         }
 
@@ -1339,7 +1453,11 @@ async function main() {
             schedule: app_state.schedule,
         }
 
-        loading_bar.remove();
+        updater = replace(updater, Updater("cached", undefined, update_cache));
+    }
+
+    if (should_update) {
+        await update_cache();
     }
 
     if (!app_state.schedule) {
@@ -1347,13 +1465,13 @@ async function main() {
         return;
     }
 
-    const search = SearchBar(app_state, (filter) => {
-        history_push_state(filter);
-        app_state.filter = filter;
-        schedule_el = replace(schedule_el, App(app_state));
-    });
-
-    content.prepend(search.el);
+    search = replace(search,
+        SearchBar(app_state, (filter) => {
+            history_push_state(filter);
+            app_state.filter = filter;
+            schedule_el = replace(schedule_el, App(app_state));
+        })
+    );
 
     schedule_el = replace(schedule_el, App(app_state));
 
