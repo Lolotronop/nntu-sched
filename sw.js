@@ -67,7 +67,7 @@ self.addEventListener("fetch", (event) => {
 
             const networkFetch = fetch(event.request)
                 .then((response) => {
-                    if (response.ok && is_app_url(url)) {
+                    if (response.ok && APP_ROUTES.includes(url)) {
                         cache.put(event.request, response.clone());
                     }
 
