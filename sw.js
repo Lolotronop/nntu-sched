@@ -34,6 +34,17 @@ const APP_ROUTES =
         "/modern-normalize.css",
     ];
 
+/**
+ * @param {URL} url 
+ */
+function is_app_url(url) {
+    if (url.origin !== self.location.origin) return false;
+    if (APP_ROUTES.includes(url.pathname)) return true;
+    if (url.pathname.startsWith("/group")) return true;
+    if (url.pathname.startsWith("/teacher")) return true;
+    return false;
+}
+
 self.addEventListener("install", (event) => {
     event.waitUntil(
         caches.open(CURRENT_CACHES.app).then(cache => {
@@ -43,15 +54,20 @@ self.addEventListener("install", (event) => {
 })
 
 self.addEventListener("fetch", (event) => {
-    console.log("Handling fetch event for", event.request.url);
+    /** @type {Request} */
+    const req = event.request;
+    const url = new URL(req.url);
 
     event.respondWith(
         caches.open(CURRENT_CACHES.app).then(async (cache) => {
-            const cached = await cache.match(event.request);
+            let cached = await cache.match(event.request);
+            if (!cached && is_app_url(url)) {
+                cached = await cache.match("/index.html");
+            }
 
             const networkFetch = fetch(event.request)
                 .then((response) => {
-                    if (response.ok && APP_ROUTES.includes(url.pathname)) {
+                    if (response.ok && is_app_url(url)) {
                         cache.put(event.request, response.clone());
                     }
 
