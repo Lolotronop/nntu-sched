@@ -7,7 +7,7 @@ const GROUPS_PATH = "/lesson-schedule/public/groups";
 const GROUP_PARAMETER = "groupName";
 
 
-const SCHEDULE_CACHE_VERSION = 2;
+const SCHEDULE_CACHE_VERSION = 3;
 
 const DAY = 1000 * 60 * 60 * 24;
 const MINUTE = 1000 * 60;
@@ -231,6 +231,8 @@ function parse_time_slot(slots) {
      * @returns {Result<Time_Of_Day, string>}
      */
     const parse_hhmm_string_to_time_of_day = (str) => {
+        str = str.trim();
+        if (!/^\d{1,2}:\d{2}$/.test(str)) return err("String must be in HH:MM format");
         const parts = str.split(":");
         if (parts.length != 2) return err("String must be in HH:MM format, failed to split on :");
 
@@ -380,6 +382,7 @@ function week_number(d) {
  * @returns {Schedule_Full}
  */
 function parse_full_schedule(groups) {
+    const now = new Date();
     //=======local functions======
 
     /**
@@ -485,17 +488,23 @@ function parse_full_schedule(groups) {
             continue;
         }
 
-        schedule.time_slots = schedule_response.times.map(parse_time_slot).filter(el => el.ok).map(el => el.data)
-        if (schedule.time_slots.length !== 7) {
+        const time_slots = schedule_response.times.map(parse_time_slot).filter(el => el.ok).map(el => el.data);
+        if (time_slots.length !== 7) {
             console.error("Failed to parse time slots for group", group);
             continue;
         }
 
+        if (schedule.time_slots.length === 0) schedule.time_slots = time_slots;
         const group_id = find_or_create_element(schedule.groups, group);
 
         const days = [...schedule_response.currentWeek, ...schedule_response.nextWeek];
         for (const { dayOfTheWeek, lessonElements } of days) {
-            const parsed_date = parse_ru_date(dayOfTheWeek);
+            let parsed_date = parse_ru_date(dayOfTheWeek, now.getFullYear());
+            if (parsed_date.ok) {
+                const month_difference = parsed_date.data.getMonth() - now.getMonth();
+                if (month_difference < -6) parsed_date = parse_ru_date(dayOfTheWeek, now.getFullYear() + 1);
+                if (month_difference > 6) parsed_date = parse_ru_date(dayOfTheWeek, now.getFullYear() - 1);
+            }
             if (!parsed_date.ok) {
                 console.error("Failed to parse date", dayOfTheWeek, "for group", group);
                 continue;
@@ -510,9 +519,14 @@ function parse_full_schedule(groups) {
                     continue;
                 }
 
+                const time_slot_index = lesson_element.timeIndex - 1;
+                if (!Number.isInteger(time_slot_index) || time_slot_index < 0 || time_slot_index >= time_slots.length) {
+                    console.error("Invalid time index for group", group, lesson_element.timeIndex);
+                    continue;
+                }
                 schedule.lessons_compressed.push({
                     group_id,
-                    time_slot_id: lesson_element.timeIndex - 1,
+                    time_slot_id: time_slot_index,
                     day,
                     subject_id: find_or_create_element(schedule.subjects, lesson_element.subject),
                     teacher_id: find_or_create_element(schedule.teachers, lesson_element.teacher),
@@ -572,7 +586,7 @@ function cache_entry_from_string(str) {
 function cache_find_entries(key, version) {
     /** @type {Cache_Entry[]} */
     const entries = [];
-    for (let i = 0; i < localStorage.length; i++) {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
         const entry_str = localStorage.key(i);
         if (!entry_str) continue;
         const entry = cache_entry_from_string(entry_str);
@@ -639,7 +653,7 @@ function cache_load_schedule() {
 
 /** 
  * @param {Schedule_Full} schedule
- * @returns {Cache_Entry}
+ * @returns {Cache_Entry|null}
  */
 function cache_save_schedule(schedule) {
     /** @type {Cache_Entry} */
@@ -653,6 +667,7 @@ function cache_save_schedule(schedule) {
         localStorage.setItem(cache_entry_to_string(entry), JSON.stringify(schedule));
     } catch (e) {
         console.error("Failed to save to localStorage", e)
+        return null;
     }
 
     return entry;
@@ -727,8 +742,13 @@ function schedule_filter_from_pathname(pathname) {
     while (parts[0] === "") { parts.shift(); }
     const [by, value_str] = parts;
     if (by !== "group" && by !== "teacher") return null;
-    const value = decodeURIComponent(value_str);
-    return { by, value };
+    if (value_str === undefined) return null;
+    try {
+        const value = decodeURIComponent(value_str);
+        return { by, value };
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -1027,13 +1047,15 @@ function Schedule(days, now, change_filter) {
  * @param {Schedule_Filter} filter
  */
 function apply_filter(app_state, filter) {
-    app_state.filter = filter;
-    app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
+    if (!filter_eq(app_state.filter, filter)) {
+        app_state.filter = filter;
+        app_state.now = new Date();
+        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, app_state.now);
+    }
     const state = window.history.state;
-    if (filter_eq(state?.filter, filter)) return;
+    if (state?.filter && filter_eq(state.filter, filter)) return;
     window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
     document.title = `НГТУ ${filter.value}`;
-    app_state.now = new Date();
 }
 
 
@@ -1105,7 +1127,7 @@ function resolve_search_arrays(schedule) {
     }
 
     for (const teacher of schedule.teachers || []) {
-        search_arrays.teacher.push(teacher.toLowerCase().replace(/ /g, "").replace(/\./g, ""));
+        search_arrays.teacher.push(teacher.toLowerCase().replace(/\s/g, "").replace(/\./g, ""));
     }
 
     return search_arrays;
@@ -1122,7 +1144,9 @@ function SearchBar(app_state, app_rerender) {
         //@ts-ignore
         const target = e.target;
 
-        const search = target.value.toLowerCase().replace(/-/g, "");
+        const search = app_state.filter.by === "teacher"
+            ? target.value.toLowerCase().replace(/\s/g, "").replace(/\./g, "")
+            : target.value.toLowerCase().replace(/-/g, "");
         results_el.innerHTML = "";
 
         if (search.length < 1) {
@@ -1237,7 +1261,7 @@ function SearchBar(app_state, app_rerender) {
         app_rerender();
     }
 
-    const input_el = el("input", { type: "text", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
+    const input_el = el("input", { type: "text", title: "Поиск группы или преподавателя", placeholder: " ", oninput: handle_search_input, onfocus: handle_search_input, onkeydown: handle_search_key });
 
     input_el.value = app_state.filter.value;
 
@@ -1264,7 +1288,7 @@ function SearchBar(app_state, app_rerender) {
             input_el,
 
             el("button", {
-                class: "save",
+                class: "save", title: "Добавить или удалить закладку",
                 onclick: () => {
                     bookmarks_toggle(app_state.bookmarks, app_state.filter);
                     app_rerender();
@@ -1351,7 +1375,6 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
         return null;
     }
 
-    now.setHours(0, 0, 0, 0);
     let this_week_no = week_number(now);
     const this_week_even = this_week_no % 2 === 0;
     const even_monday = new Date(now.getTime());
@@ -1559,7 +1582,7 @@ function Bookmark(filter, app_state, rerender) {
             el("span", {}, filter.value),
         ),
         el("button", {
-            class: "remove", onclick: () => {
+            class: "remove", title: "Удалить закладку", onclick: () => {
                 bookmarks_remove(app_state.bookmarks, filter);
                 rerender();
             }
@@ -1626,14 +1649,22 @@ function time_diff_text(past, now) {
 function Updater(app_state, onupdate) {
     const { update_state, now } = app_state;
 
+    const rerender = () => {
+        const next = Updater(app_state, onupdate);
+        self.el.className = next.el.className;
+        self.el.replaceChildren(...next.el.childNodes);
+        next.el = self.el;
+        self = next;
+    }
+
     const visual_cache_update = async () => {
         app_state.update_state = "downloading";
-        self = replace(self, Updater(app_state, onupdate));
+        rerender();
 
         let groups = await get_groups_raw();
         if (!groups.ok) {
             app_state.update_state = "failed";
-            self = replace(self, Updater(app_state, onupdate));
+            rerender();
             console.error("Failed to get groups");
             return;
         }
@@ -1645,22 +1676,25 @@ function Updater(app_state, onupdate) {
 
         if (!all_schedules_result.ok) {
             app_state.update_state = "failed";
-            self = replace(self, Updater(app_state, onupdate));
+            rerender();
             return;
         }
 
         app_state.schedule = parse_full_schedule(all_schedules_result.data);
-        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
-        app_state.search_arrays = resolve_search_arrays(app_state.schedule);
         app_state.now = new Date();
+        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, app_state.now);
+        app_state.search_arrays = resolve_search_arrays(app_state.schedule);
         const entry = cache_save_schedule(app_state.schedule);
-        if (app_state.cache_entry) {
-            localStorage.removeItem(cache_entry_to_string(app_state.cache_entry));
+        if (entry) {
+            if (app_state.cache_entry && cache_entry_to_string(app_state.cache_entry) !== cache_entry_to_string(entry)) {
+                localStorage.removeItem(cache_entry_to_string(app_state.cache_entry));
+            }
+            app_state.cache_entry = entry;
         }
-        app_state.cache_entry = entry;
 
         app_state.update_state = "cached";
-        self = replace(self, Updater(app_state, onupdate));
+        rerender();
+        onupdate();
     }
 
     let time_diff;
@@ -1791,12 +1825,23 @@ async function main() {
 
     app_state.filter = schedule_filter_from_pathname(window.location.pathname) ?? { by: "group", value: "" };
     document.title = `НГТУ ${app_state.filter.value}`;
+    window.history.replaceState({ filter: app_state.filter }, "", window.location.href);
     app_state.bookmarks = storage_load(BOOKMARK_KEY) ?? [];
 
 
     let app_el = App(app_state, app_rerender);
     function app_rerender() {
-        app_state.now = new Date();
+        const now = new Date();
+        const previous_monday = new Date(app_state.now);
+        previous_monday.setHours(0, 0, 0, 0);
+        previous_monday.setDate(previous_monday.getDate() - (previous_monday.getDay() + 6) % 7);
+        const monday = new Date(now);
+        monday.setHours(0, 0, 0, 0);
+        monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+        if (previous_monday.getTime() !== monday.getTime()) {
+            app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, now);
+        }
+        app_state.now = now;
         app_el = replace(app_el, App(app_state, app_rerender));
     }
 
@@ -1826,23 +1871,17 @@ async function main() {
         should_update = time_since_update > SCHEDULE_CACHE_TIMEOUT;
     }
 
-    if (should_update) {
-        await updater.update();
-        app_el = replace(app_el, App(app_state, app_rerender));
-    }
-
     window.addEventListener("popstate", (event) => {
-        if (!event.state) return;
-        /** @type {History_State} */
+        /** @type {History_State|null} */
         const history_state = event.state;
-        if (!history_state.filter) {
-            console.error("No filter in history found");
-            return;
+        const filter = history_state?.filter ?? schedule_filter_from_pathname(window.location.pathname) ?? { by: "group", value: "" };
+        if (!filter_eq(app_state.filter, filter)) {
+            app_state.filter = filter;
+            app_state.now = new Date();
+            app_state.weeks = resolve_schedule_weeks(app_state.schedule, filter, app_state.now);
         }
-        app_state.filter = history_state.filter;
-        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
-        app_state.now = new Date();
-        app_el = replace(app_el, App(app_state, app_rerender));
+        document.title = `НГТУ ${app_state.filter.value}`;
+        app_rerender();
     });
 
 
@@ -1855,6 +1894,7 @@ async function main() {
             updater = replace(updater, Updater(app_state, app_rerender));
         }
 
+        if (rerender_timer) clearInterval(rerender_timer);
         rerender_timer = setInterval(app_rerender, 60 * 1000);
     }
     window.onblur = () => {
@@ -1863,6 +1903,8 @@ async function main() {
             rerender_timer = null;
         }
     }
+    if (document.hasFocus()) rerender_timer = setInterval(app_rerender, 60 * 1000);
+    if (should_update) await updater.update();
 }
 
 
