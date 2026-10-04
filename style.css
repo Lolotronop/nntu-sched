@@ -32,6 +32,16 @@ body {
     flex-direction: column;
 }
 
+a {
+    color: inherit;
+    cursor: pointer;
+    text-decoration-line: none;
+
+    &:hover {
+        text-decoration-line: underline;
+    }
+}
+
 button {
     cursor: pointer;
     background-color: inherit;
@@ -244,6 +254,10 @@ button {
 
     overflow: hidden;
 
+    &:has(.today) {
+        border-color: var(--accent-bg);
+    }
+
     .lesson,
     .header {
         padding: 0.75em;
@@ -258,10 +272,10 @@ button {
             font-weight: 600;
         }
 
-    }
-
-    .header.today {
-        background-color: var(--accent-bg);
+        &.today {
+            background-color: var(--accent-bg);
+            border-color: var(--accent-bg);
+        }
     }
 
     :last-child {
@@ -316,7 +330,7 @@ button {
     display: flex;
     flex-direction: row;
     border-radius: var(--radius);
-    overflow: hidden;
+    /* overflow: hidden; */
     gap: 0.5em;
     position: sticky;
     bottom: 0.5em;
@@ -328,6 +342,7 @@ button {
         padding: 0.75em 0;
         background-color: var(--card-bg);
         border: 1px solid var(--border);
+        box-shadow: 0 0 0.75em var(--bg);
 
         &.selected {
             border: none;

@@ -696,16 +696,6 @@ function storage_load(key) {
  * @property {Schedule_Filter|null} filter
  */
 
-/**
- * @param {Schedule_Filter} filter
- */
-function history_push_state(filter) {
-    /** @type {History_State|undefined} */
-    const state = window.history.state;
-    if (state?.filter === filter) return;
-    window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
-}
-
 
 /**
  * @typedef Schedule_Filter_By
@@ -840,9 +830,10 @@ function TimeSlot(time_slot) {
 
 /**
  * @param {Lesson} lesson
+ * @param {(filter: Schedule_Filter) => void} change_filter
  * @returns {HTMLElement}
  */
-function LessonCard(lesson) {
+function LessonCard(lesson, change_filter) {
     /** @type {HTMLElement} */
     let lesson_type_icon;
     let lesson_type_class = "unknown"
@@ -876,6 +867,15 @@ function LessonCard(lesson) {
         );
     };
 
+    let teacher_name = "???";
+
+    if (lesson.teacher_short && lesson.teacher_short.length > 0) {
+        teacher_name = lesson.teacher_short;
+    } else if (lesson.teacher_full && lesson.teacher_full.length > 0) {
+        teacher_name = lesson.teacher_full;
+    }
+
+
     return el("div", { class: "lesson" },
         el("span", { class: "flex-row gap-1" },
             el("span", { class: "muted", style: "min-width: 14px; display: flex; justify-content: end;" },
@@ -908,7 +908,16 @@ function LessonCard(lesson) {
 
             with_icon(
                 Icon(ICONS.teacher, 14), {},
-                el("span", { title: lesson.teacher_full }, !!lesson.teacher_short && lesson.teacher_short.length > 0 ? lesson.teacher_short : lesson.teacher_full)
+                el("a", {
+                    title: lesson.teacher_full,
+                    href: schedule_filter_to_pathname({ by: "teacher", value: lesson.teacher_full }),
+                    onclick: (e) => {
+                        e.preventDefault();
+                        change_filter({ by: "teacher", value: lesson.teacher_full });
+                    },
+                },
+                    teacher_name
+                )
             ),
         ),
 
@@ -916,7 +925,14 @@ function LessonCard(lesson) {
         el("div", { class: "flex-row gap-1" },
             el("div", { style: "padding-top: 0.25em;" }, Icon(ICONS.group, 14)),
             el("div", { class: "flex-col gap-2" },
-                ...lesson.groups.map(group => el("span", {}, group))
+                ...lesson.groups.map(group => el("a", {
+                    title: group,
+                    href: schedule_filter_to_pathname({ by: "group", value: group }),
+                    onclick: (e) => {
+                        e.preventDefault();
+                        change_filter({ by: "group", value: group })
+                    }
+                }, group))
             ),
         ),
     );
@@ -962,11 +978,12 @@ function DayHeader(date, has_lessons, now) {
 /**
  * @param {Day} day
  * @param {Date} now
+ * @param {(filter: Schedule_Filter) => void} change_filter
  * @returns {HTMLElement}
  */
-function DayCard(day, now) {
+function DayCard(day, now, change_filter) {
     const header = DayHeader(day.date, day.lessons.length > 0, now)
-    const lesson_cards = day.lessons.map(l => LessonCard(l))
+    const lesson_cards = day.lessons.map(l => LessonCard(l, change_filter))
     return el("div", { class: "day" },
         header,
         ...lesson_cards
@@ -976,15 +993,16 @@ function DayCard(day, now) {
 /**
  * @param {Day[]} days
  * @param {Date} now
+ * @param {(filter: Schedule_Filter) => void} change_filter
  * @returns {HTMLElement}
  */
-function Schedule(days, now) {
+function Schedule(days, now, change_filter) {
     if (days.map(el => el.lessons.length).reduce((a, b) => a + b, 0) === 0) {
         return el("div", { class: "schedule" },
             el("div", { class: "empty" }, "Нет данных")
         )
     }
-    const day_cards = days.map(el => DayCard(el, now))
+    const day_cards = days.map(el => DayCard(el, now, change_filter))
     return el("div", { class: "schedule" }, ...day_cards)
 }
 
@@ -1011,7 +1029,10 @@ function Schedule(days, now) {
 function apply_filter(app_state, filter) {
     app_state.filter = filter;
     app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
-    history_push_state(app_state.filter);
+    const state = window.history.state;
+    if (state?.filter === filter) return;
+    window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
+    document.title = `НГТУ ${filter.value}`;
     app_state.now = new Date();
 }
 
@@ -1113,8 +1134,6 @@ function SearchBar(app_state, app_rerender) {
         for (let i = 0; i < search_array.length; i++) {
             const search_element = search_array[i];
             if (search_element.includes(search)) {
-                if (!app_state.schedule) return;
-
                 /** @type {string} */
                 let value;
                 if (app_state.filter.by === "group") {
@@ -1696,8 +1715,14 @@ function App(state) {
         next_week = state.weeks.odd;
     }
 
-    const current_week_el = Schedule(current_week, state.now);
-    const next_week_el = Schedule(next_week, state.now);
+    /** @param {Schedule_Filter} filter */
+    const change_filter = (filter) => {
+        apply_filter(state, filter);
+        rerender();
+    }
+
+    const current_week_el = Schedule(current_week, state.now, change_filter);
+    const next_week_el = Schedule(next_week, state.now, change_filter);
 
     let selected_week_el = state.show_next ? next_week_el : current_week_el;
 
@@ -1764,7 +1789,13 @@ async function main() {
         now: new Date(),
     };
 
+    // a random thing to test different week days
+    // if (IS_DEV) {
+    //     app_state.now = new Date(app_state.now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    // }
+
     app_state.filter = schedule_filter_from_pathname(window.location.pathname) ?? { by: "group", value: "" };
+    document.title = `НГТУ ${app_state.filter.value}`;
     app_state.bookmarks = storage_load(BOOKMARK_KEY) ?? [];
 
     let updater = Updater(app_state);
