@@ -53,6 +53,24 @@ const ICONS = {
     search: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search preview-icon"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>`,
 };
 
+/** @type {Record<Schedule_Filter_By, {
+ * values: "groups"|"teachers", lesson_id: "group_id"|"teacher_id",
+ * icon: string, label: string, other: Schedule_Filter_By, ignore: RegExp
+ * }>} */
+const FILTER_TYPES = {
+    group: { values: "groups", lesson_id: "group_id", icon: ICONS.group, label: "Группа", other: "teacher", ignore: /-/g },
+    teacher: { values: "teachers", lesson_id: "teacher_id", icon: ICONS.teacher, label: "Препод", other: "group", ignore: /[\s.]/g },
+};
+
+/** @type {Record<string, "practice"|"lecture"|"lab">} */
+const LESSON_TYPES = { "практ.": "practice", "лек.": "lecture", "лаб. раб.": "lab" };
+
+/** @param {Schedule_Filter_By} by
+ * @param {string} value */
+function normalize_search(by, value) {
+    return value.toLowerCase().replace(FILTER_TYPES[by].ignore, "");
+}
+
 /**
  * @template T
  * @typedef Result_Success<T>
@@ -350,6 +368,19 @@ function week_number(d) {
 }
 
 
+/** @param {Date} date */
+function week_monday(date) {
+    const monday = new Date(date.getTime());
+    monday.setHours(0, 0, 0, 0);
+    // for WTF is a kilometer reasons .getDay returns 0 for sunday.
+    // this means that monday is 1, so I need to subtract 1 from the result
+    // but a negative number is not a valid day of the week, so I need to
+    // add 7 to the result, then modulo 7 it to get the correct day of the week
+    const day_of_week = (monday.getDay() - 1 + 7) % 7;
+    monday.setDate(monday.getDate() - day_of_week);
+    return monday;
+}
+
 /**
  * @typedef Lesson_Compressed
  * @type {object}
@@ -415,13 +446,7 @@ function parse_full_schedule(groups) {
             if (item === "") return -1;
         }
 
-        /** @param {any} a
-         @param {any} b */
-        let eq = (a, b) => a === b;
-        if (item instanceof Date) {
-            eq = (a, b) => a.getTime() === b.getTime();
-        }
-        const index = arr.findIndex(el => eq(el, item));
+        const index = arr.indexOf(item);
         if (index === -1) {
             arr.push(item);
             return arr.length - 1;
@@ -608,23 +633,6 @@ function cache_find_entries(key, version) {
 
 
 /**
- * @param {string} json
- * @returns {Schedule_Full|null}
- */
-function schedule_from_json(json) {
-    /** @type {Schedule_Full} */
-    let schedule;
-    try {
-        schedule = JSON.parse(json)
-    } catch (e) {
-        console.error("Failed to parse schedule", e);
-        return null;
-    }
-
-    return schedule;
-}
-
-/**
  * @returns {{schedule: Schedule_Full, entry: Cache_Entry}|null}
  */
 function cache_load_schedule() {
@@ -642,10 +650,8 @@ function cache_load_schedule() {
     }
 
     const schedule_key = cache_entry_to_string(entry);
-    const json = localStorage.getItem(schedule_key);
-    if (!json) return null;
-
-    const schedule = schedule_from_json(json);
+    /** @type {Schedule_Full|null} */
+    const schedule = storage_load(schedule_key);
     if (!schedule) return null;
 
     return { schedule, entry };
@@ -663,14 +669,7 @@ function cache_save_schedule(schedule) {
         date: new Date(),
     };
 
-    try {
-        localStorage.setItem(cache_entry_to_string(entry), JSON.stringify(schedule));
-    } catch (e) {
-        console.error("Failed to save to localStorage", e)
-        return null;
-    }
-
-    return entry;
+    return storage_save(cache_entry_to_string(entry), schedule) ? entry : null;
 }
 
 /**
@@ -680,8 +679,10 @@ function cache_save_schedule(schedule) {
 function storage_save(key, value) {
     try {
         localStorage.setItem(key, JSON.stringify(value));
+        return true;
     } catch (e) {
         console.error("Failed to save to localStorage", e)
+        return false;
     }
 }
 
@@ -848,30 +849,28 @@ function TimeSlot(time_slot) {
     )
 }
 
+/** @param {Schedule_Filter} filter
+ * @param {(filter: Schedule_Filter) => void} change_filter
+ * @param {string} label */
+function FilterLink(filter, change_filter, label = filter.value) {
+    return el("a", {
+        title: filter.value,
+        href: schedule_filter_to_pathname(filter),
+        onclick: (e) => {
+            e.preventDefault();
+            change_filter(filter);
+        },
+    }, label);
+}
+
 /**
  * @param {Lesson} lesson
  * @param {(filter: Schedule_Filter) => void} change_filter
  * @returns {HTMLElement}
  */
 function LessonCard(lesson, change_filter) {
-    /** @type {HTMLElement} */
-    let lesson_type_icon;
-    let lesson_type_class = "unknown"
-
-    // TODO: make this less string-dpeendant
-    if (lesson.type === "практ.") {
-        lesson_type_icon = Icon(ICONS.practice, 14);
-        lesson_type_class = "practice"
-    } else if (lesson.type === "лек.") {
-        lesson_type_icon = Icon(ICONS.lecture, 14);
-        lesson_type_class = "lecture";
-    } else if (lesson.type === "лаб. раб.") {
-        lesson_type_icon = Icon(ICONS.lab, 14);
-        lesson_type_class = "lab";
-    } else {
-        lesson_type_icon = Icon(ICONS.unknown, 14);
-        lesson_type_class = "unkonwn";
-    }
+    const lesson_type_class = LESSON_TYPES[lesson.type] || "unknown";
+    const lesson_type_icon = Icon(ICONS[lesson_type_class]);
 
     /**
      * @param {HTMLElement} icon
@@ -880,21 +879,14 @@ function LessonCard(lesson, change_filter) {
      * @returns 
      */
     function with_icon(icon, options, ...children) {
-        options.class = `with-icon ${options.class}`
+        options.class = `with-icon ${options.class || ""}`
         return el("div", options,
             icon,
             el("div", {}, ...children)
         );
     };
 
-    let teacher_name = "???";
-
-    if (lesson.teacher_short && lesson.teacher_short.length > 0) {
-        teacher_name = lesson.teacher_short;
-    } else if (lesson.teacher_full && lesson.teacher_full.length > 0) {
-        teacher_name = lesson.teacher_full;
-    }
-
+    const teacher_name = lesson.teacher_short || lesson.teacher_full || "???";
 
     return el("div", { class: "lesson" },
         el("span", { class: "flex-row gap-1" },
@@ -928,16 +920,7 @@ function LessonCard(lesson, change_filter) {
 
             with_icon(
                 Icon(ICONS.teacher, 14), {},
-                el("a", {
-                    title: lesson.teacher_full,
-                    href: schedule_filter_to_pathname({ by: "teacher", value: lesson.teacher_full }),
-                    onclick: (e) => {
-                        e.preventDefault();
-                        change_filter({ by: "teacher", value: lesson.teacher_full });
-                    },
-                },
-                    teacher_name
-                )
+                FilterLink({ by: "teacher", value: lesson.teacher_full }, change_filter, teacher_name)
             ),
         ),
 
@@ -945,14 +928,7 @@ function LessonCard(lesson, change_filter) {
         el("div", { class: "flex-row gap-1" },
             el("div", { style: "padding-top: 0.25em;" }, Icon(ICONS.group, 14)),
             el("div", { class: "flex-col gap-2" },
-                ...lesson.groups.map(group => el("a", {
-                    title: group,
-                    href: schedule_filter_to_pathname({ by: "group", value: group }),
-                    onclick: (e) => {
-                        e.preventDefault();
-                        change_filter({ by: "group", value: group })
-                    }
-                }, group))
+                ...lesson.groups.map(group => FilterLink({ by: "group", value: group }, change_filter))
             ),
         ),
     );
@@ -981,18 +957,11 @@ function DayHeader(date, has_lessons, now) {
     const header_class = is_today ? "header today" : "header"
 
 
-    if (!has_lessons) {
-        return el("div", { class: header_class },
-            el("span", { class: "week-day muted" }, weekday),
-            el("span", { class: "muted" }, date_str),
-            el("span", { class: "muted" }, " - пар нет")
-        )
-    } else {
-        return el("div", { class: header_class },
-            el("span", { class: "week-day" }, weekday),
-            el("span", { class: "muted" }, date_str),
-        )
-    }
+    return el("div", { class: header_class },
+        el("span", { class: has_lessons ? "week-day" : "week-day muted" }, weekday),
+        el("span", { class: "muted" }, date_str),
+        !has_lessons && el("span", { class: "muted" }, " - пар нет")
+    );
 }
 
 /**
@@ -1017,7 +986,7 @@ function DayCard(day, now, change_filter) {
  * @returns {HTMLElement}
  */
 function Schedule(days, now, change_filter) {
-    if (days.map(el => el.lessons.length).reduce((a, b) => a + b, 0) === 0) {
+    if (!days.some(day => day.lessons.length > 0)) {
         return el("div", { class: "schedule" },
             el("div", { class: "empty" }, "Нет данных")
         )
@@ -1042,16 +1011,30 @@ function Schedule(days, now, change_filter) {
  * @property {"downloading" | "cached" | "failed" } update_state
 */
 
+/** @param {App_State} app_state
+ * @param {Schedule_Filter} filter */
+function set_filter(app_state, filter) {
+    if (filter_eq(app_state.filter, filter)) return;
+    app_state.filter = filter;
+    app_state.now = new Date();
+    app_state.weeks = resolve_schedule_weeks(app_state.schedule, filter, app_state.now);
+}
+
+/** @param {App_State} app_state
+ * @param {Schedule_Full} schedule */
+function set_schedule(app_state, schedule) {
+    app_state.schedule = schedule;
+    app_state.now = new Date();
+    app_state.search_arrays = resolve_search_arrays(schedule);
+    app_state.weeks = resolve_schedule_weeks(schedule, app_state.filter, app_state.now);
+}
+
 /**
  * @param {App_State} app_state
  * @param {Schedule_Filter} filter
  */
 function apply_filter(app_state, filter) {
-    if (!filter_eq(app_state.filter, filter)) {
-        app_state.filter = filter;
-        app_state.now = new Date();
-        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, app_state.now);
-    }
+    set_filter(app_state, filter);
     const state = window.history.state;
     if (state?.filter && filter_eq(state.filter, filter)) return;
     window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
@@ -1094,19 +1077,11 @@ function bookmarks_remove(bookmarks, filter) {
  */
 function SelectorButtons(show_next, onselect) {
     return el("div", { class: "week-selector" },
-        el("button", {
-            class: !show_next ? "selected" : "",
-            onclick: () => {
-                onselect(false);
-            }
-        }, "Эта неделя"),
-        el("button", {
-            class: show_next ? "selected" : "",
-            onclick: () => {
-                onselect(true);
-            }
-        }, "Следующая неделя"),
-    )
+        ...[false, true].map(next => el("button", {
+            class: show_next === next ? "selected" : "",
+            onclick: () => onselect(next),
+        }, next ? "Следующая неделя" : "Эта неделя")),
+    );
 }
 
 
@@ -1116,21 +1091,10 @@ function SelectorButtons(show_next, onselect) {
  * @returns 
  */
 function resolve_search_arrays(schedule) {
-    /** @type {Record<Schedule_Filter_By, string[]>} */
-    const search_arrays = {
-        group: [],
-        teacher: [],
-    }
-
-    for (const group of schedule.groups || []) {
-        search_arrays.group.push(group.toLowerCase().replace(/-/g, ""));
-    }
-
-    for (const teacher of schedule.teachers || []) {
-        search_arrays.teacher.push(teacher.toLowerCase().replace(/\s/g, "").replace(/\./g, ""));
-    }
-
-    return search_arrays;
+    return {
+        group: (schedule.groups || []).map(value => normalize_search("group", value)),
+        teacher: (schedule.teachers || []).map(value => normalize_search("teacher", value)),
+    };
 }
 
 /**
@@ -1144,9 +1108,7 @@ function SearchBar(app_state, app_rerender) {
         //@ts-ignore
         const target = e.target;
 
-        const search = app_state.filter.by === "teacher"
-            ? target.value.toLowerCase().replace(/\s/g, "").replace(/\./g, "")
-            : target.value.toLowerCase().replace(/-/g, "");
+        const search = normalize_search(app_state.filter.by, target.value);
         results_el.innerHTML = "";
 
         if (search.length < 1) {
@@ -1158,15 +1120,7 @@ function SearchBar(app_state, app_rerender) {
         for (let i = 0; i < search_array.length; i++) {
             const search_element = search_array[i];
             if (search_element.includes(search)) {
-                /** @type {string} */
-                let value;
-                if (app_state.filter.by === "group") {
-                    value = app_state.schedule.groups[i];
-                } else if (app_state.filter.by === "teacher") {
-                    value = app_state.schedule.teachers[i];
-                } else {
-                    throw new Error(`Unknown search by ${app_state.filter.by}`);
-                }
+                const value = app_state.schedule[FILTER_TYPES[app_state.filter.by].values][i];
                 const result_el = el("button", { class: "result", onkeydown: handle_search_key }, value);
 
                 result_el.onmouseenter = () => {
@@ -1242,21 +1196,13 @@ function SearchBar(app_state, app_rerender) {
         }
     }
 
-    /** @type {Record<Schedule_Filter["by"], HTMLElement>} */
-    const filter_types = {
-        group: el("button", { class: "type", onclick: () => set_filter({ by: "teacher", value: "" }) },
-            Icon(ICONS.group, 14),
-            el("span", {}, "Группа")
-        ),
-        teacher: el("button", { class: "type", onclick: () => set_filter({ by: "group", value: "" }) },
-            Icon(ICONS.teacher, 14),
-            el("span", {}, "Препод")
-        )
-    }
+    const filter_type = FILTER_TYPES[app_state.filter.by];
+    const filter_el = el("button", {
+        class: "type", onclick: () => set_filter({ by: filter_type.other, value: "" }),
+    }, Icon(filter_type.icon), el("span", {}, filter_type.label));
 
     /** @param {Schedule_Filter} filter */
     function set_filter(filter) {
-        input_el.value = app_state.filter.value;
         apply_filter(app_state, filter);
         app_rerender();
     }
@@ -1266,7 +1212,6 @@ function SearchBar(app_state, app_rerender) {
     input_el.value = app_state.filter.value;
 
     const results_el = el("div", { class: "results" });
-    let filter_el = filter_types[app_state.filter?.by || "group"];
 
     let star_icon = Icon(ICONS.star, 18);
     if (app_state.bookmarks.find(f => filter_eq(f, app_state.filter))) {
@@ -1302,10 +1247,6 @@ function SearchBar(app_state, app_rerender) {
         results_el
     );
 
-    if (app_state.filter) {
-        input_el.value = app_state.filter.value;
-    }
-
     return search_el;
 }
 
@@ -1324,7 +1265,7 @@ function SearchBar(app_state, app_rerender) {
  * @returns {Schedule_Weeks}
  */
 function resolve_schedule_weeks(schedule, filter, now = new Date()) {
-    /** @type Record<string, string> */
+    /** @type Record<string, string|null> */
     const short_teachers = {};
     /**
      * @param {string|undefined} input
@@ -1345,7 +1286,7 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
         return `${surname} ${name[0]}. ${grandname[0]}.`
     }
 
-    /** @type Record<string, string> */
+    /** @type Record<string, string|null> */
     const short_rooms = {};
     /**
      * TODO: maybe store rooms as an object
@@ -1377,19 +1318,9 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
 
     let this_week_no = week_number(now);
     const this_week_even = this_week_no % 2 === 0;
-    const even_monday = new Date(now.getTime());
-    even_monday.setHours(0, 0, 0, 0);
+    const even_monday = week_monday(now);
 
-    // for WTF is a kilometer reasons .getDay returns 0 for sunday.
-    // this means that monday is 1, so I need to subtract 1 from the result
-    // but a negative number is not a valid day of the week, so I need to
-    // add 7 to the result, then modulo 7 it to get the correct day of the week
-    let actual_day_of_the_week = (even_monday.getDay() - 1 + 7) % 7;
-    let even_monday_offset = -actual_day_of_the_week;
-    if (!this_week_even) {
-        even_monday_offset -= 7;
-    }
-    even_monday.setDate(even_monday.getDate() + even_monday_offset);
+    if (!this_week_even) even_monday.setDate(even_monday.getDate() - 7);
 
     /** @type {Schedule_Weeks} */
     const weeks = {
@@ -1419,56 +1350,21 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
         })
     }
 
-    let search_id = -1;
-    if (filter.by === "group") {
-        search_id = schedule.groups.findIndex(el => el === filter.value);
-        if (search_id === -1) {
-            console.error(`Failed to find group ${filter.value}`)
-            return weeks;
-        }
-    } else if (filter.by === "teacher") {
-        search_id = schedule.teachers.findIndex(el => el === filter.value);
-        if (search_id === -1) {
-            console.error(`Failed to find teacher ${filter.value}`)
-            return weeks;
-        }
-    }
-
+    const filter_type = FILTER_TYPES[filter.by];
+    const search_id = schedule[filter_type.values].indexOf(filter.value);
     if (search_id === -1) {
-        console.error(`Failed to find search id for ${filter.by} ${filter.value}`)
+        console.error(`Failed to find ${filter.by} ${filter.value}`);
         return weeks;
     }
 
     for (const compressed_lesson of schedule.lessons_compressed) {
-        if (filter.by === "group") {
-            if (compressed_lesson.group_id !== search_id) {
-                continue;
-            }
-        } else if (filter.by === "teacher") {
-            if (compressed_lesson.teacher_id !== search_id) {
-                continue;
-            }
-        }
+        if (compressed_lesson[filter_type.lesson_id] !== search_id) continue;
 
-        /** @type {string|null} */
-        let room_short;
-        room_short = short_rooms[compressed_lesson.room_id];
-        if (!room_short) {
-            room_short = shorten_room(schedule.rooms[compressed_lesson.room_id]);
-            if (room_short) {
-                short_rooms[compressed_lesson.room_id] = room_short;
-            }
-        }
-
-        /** @type {string|null} */
-        let teacher_short;
-        teacher_short = short_teachers[compressed_lesson.teacher_id];
-        if (!teacher_short) {
-            teacher_short = shorten_teacher(schedule.teachers[compressed_lesson.teacher_id]);
-            if (teacher_short) {
-                short_teachers[compressed_lesson.teacher_id] = teacher_short;
-            }
-        }
+        const { room_id, teacher_id } = compressed_lesson;
+        if (!(room_id in short_rooms)) short_rooms[room_id] = shorten_room(schedule.rooms[room_id]);
+        if (!(teacher_id in short_teachers)) short_teachers[teacher_id] = shorten_teacher(schedule.teachers[teacher_id]);
+        const room_short = short_rooms[room_id];
+        const teacher_short = short_teachers[teacher_id];
 
         const date = new Date(even_monday);
         date.setDate(date.getDate() + compressed_lesson.day);
@@ -1519,13 +1415,9 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
     /** @param {Day[]} week */
     function merge_teacher_lessons(week) {
         for (const day of week) {
+            /** @type {Lesson[]} */
             const new_lessons = [];
             for (const lesson of day.lessons) {
-                if (new_lessons.length === 0) {
-                    new_lessons.push(lesson);
-                    continue;
-                }
-
                 const same_lesson = new_lessons.find(el => {
                     return el.time_slot_index === lesson.time_slot_index
                         && el.room === lesson.room
@@ -1556,15 +1448,7 @@ function resolve_schedule_weeks(schedule, filter, now = new Date()) {
  * @param {() => void} rerender
  */
 function Bookmark(filter, app_state, rerender) {
-    /** @type {ReturnType<typeof Icon>} */
-    let icon;
-    if (filter.by === "group") {
-        icon = Icon(ICONS.group, 18);
-    } else if (filter.by === "teacher") {
-        icon = Icon(ICONS.teacher, 18);
-    } else {
-        icon = Icon(ICONS.unknown, 18)
-    }
+    const icon = Icon(FILTER_TYPES[filter.by].icon, 18);
 
     const star = Icon(ICONS.star, 18, "yellow");
 
@@ -1612,32 +1496,12 @@ function BookmarksList(app_state, rerender) {
 function time_diff_text(past, now) {
     const diff = now.getTime() - past.getTime();
 
-    /** @type number */
-    let diff_value;
-    /** @type Intl.RelativeTimeFormatUnit */
-    let diff_unit;
-
-    if (diff < 1000 * 60) {
-        diff_value = Math.round(diff / 1000);
-        diff_unit = "seconds";
-    } else if (diff < 1000 * 60 * 60) {
-        diff_value = Math.round(diff / 1000 / 60);
-        diff_unit = "minutes";
-    } else if (diff < 1000 * 60 * 60 * 24) {
-        diff_value = Math.round(diff / 1000 / 60 / 60);
-        diff_unit = "hours";
-    } else if (diff < 1000 * 60 * 60 * 24 * 7) {
-        diff_value = Math.round(diff / 1000 / 60 / 60 / 24);
-        diff_unit = "days";
-    } else {
-        diff_value = Math.round(diff / 1000 / 60 / 60 / 24 / 7);
-        diff_unit = "weeks";
-    }
-
-    const relative_formatter = new Intl.RelativeTimeFormat("ru", { style: "long" });
-    const ago = relative_formatter.format(-diff_value, diff_unit);
-
-    return ago;
+    /** @type {[number, Intl.RelativeTimeFormatUnit][]} */
+    const units = [[1000, "seconds"], [MINUTE, "minutes"], [60 * MINUTE, "hours"], [DAY, "days"], [7 * DAY, "weeks"]];
+    let index = 0;
+    while (index < units.length - 1 && diff >= units[index + 1][0]) index++;
+    const [scale, unit] = units[index];
+    return new Intl.RelativeTimeFormat("ru", { style: "long" }).format(-Math.round(diff / scale), unit);
 }
 
 
@@ -1680,10 +1544,7 @@ function Updater(app_state, onupdate) {
             return;
         }
 
-        app_state.schedule = parse_full_schedule(all_schedules_result.data);
-        app_state.now = new Date();
-        app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, app_state.now);
-        app_state.search_arrays = resolve_search_arrays(app_state.schedule);
+        set_schedule(app_state, parse_full_schedule(all_schedules_result.data));
         const entry = cache_save_schedule(app_state.schedule);
         if (entry) {
             if (app_state.cache_entry && cache_entry_to_string(app_state.cache_entry) !== cache_entry_to_string(entry)) {
@@ -1737,18 +1598,9 @@ function Updater(app_state, onupdate) {
  * @param {() => void} rerender
  */
 function App(state, rerender) {
-    /** @type {Day[]} */
-    let current_week;
-    /** @type {Day[]} */
-    let next_week;
-
-    if (week_number(state.now) % 2 === 0) {
-        current_week = state.weeks.even;
-        next_week = state.weeks.odd;
-    } else {
-        current_week = state.weeks.odd;
-        next_week = state.weeks.even;
-    }
+    const this_week_even = week_number(state.now) % 2 === 0;
+    const current_week = this_week_even ? state.weeks.even : state.weeks.odd;
+    const next_week = this_week_even ? state.weeks.odd : state.weeks.even;
 
     /** @param {Schedule_Filter} filter */
     const change_filter = (filter) => {
@@ -1832,13 +1684,7 @@ async function main() {
     let app_el = App(app_state, app_rerender);
     function app_rerender() {
         const now = new Date();
-        const previous_monday = new Date(app_state.now);
-        previous_monday.setHours(0, 0, 0, 0);
-        previous_monday.setDate(previous_monday.getDate() - (previous_monday.getDay() + 6) % 7);
-        const monday = new Date(now);
-        monday.setHours(0, 0, 0, 0);
-        monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
-        if (previous_monday.getTime() !== monday.getTime()) {
+        if (week_monday(app_state.now).getTime() !== week_monday(now).getTime()) {
             app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter, now);
         }
         app_state.now = now;
@@ -1856,12 +1702,9 @@ async function main() {
     let should_update = true;
 
     if (cache) {
-        app_state.schedule = cache.schedule;
+        set_schedule(app_state, cache.schedule);
         app_state.cache_entry = cache.entry;
         app_state.update_state = "cached";
-
-        app_state.search_arrays = resolve_search_arrays(cache.schedule);
-        app_state.weeks = resolve_schedule_weeks(cache.schedule, app_state.filter);
 
         app_el = replace(app_el, App(app_state, app_rerender));
         updater = replace(updater, Updater(app_state, app_rerender));
@@ -1875,11 +1718,7 @@ async function main() {
         /** @type {History_State|null} */
         const history_state = event.state;
         const filter = history_state?.filter ?? schedule_filter_from_pathname(window.location.pathname) ?? { by: "group", value: "" };
-        if (!filter_eq(app_state.filter, filter)) {
-            app_state.filter = filter;
-            app_state.now = new Date();
-            app_state.weeks = resolve_schedule_weeks(app_state.schedule, filter, app_state.now);
-        }
+        set_filter(app_state, filter);
         document.title = `НГТУ ${app_state.filter.value}`;
         app_rerender();
     });
