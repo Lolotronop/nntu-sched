@@ -587,7 +587,7 @@ function cache_find_entries(key, version) {
     }
 
     entries.sort((a, b) => {
-        return a.date.getTime() - b.date.getTime();
+        return b.date.getTime() - a.date.getTime();
     })
     return entries;
 }
@@ -1030,7 +1030,7 @@ function apply_filter(app_state, filter) {
     app_state.filter = filter;
     app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
     const state = window.history.state;
-    if (state?.filter === filter) return;
+    if (filter_eq(state?.filter, filter)) return;
     window.history.pushState({ filter }, "", schedule_filter_to_pathname(filter));
     document.title = `НГТУ ${filter.value}`;
     app_state.now = new Date();
@@ -1154,7 +1154,6 @@ function SearchBar(app_state, app_rerender) {
                     // but I kinda like that behavior
                     result_el.blur();
                     set_filter({ by: app_state.filter.by, value });
-                    app_rerender();
                 }
 
                 results_el.append(result_el);
@@ -1622,18 +1621,19 @@ function time_diff_text(past, now) {
 
 /**
  * @param {App_State} app_state
+ * @param {() => void} onupdate
  */
-function Updater(app_state) {
+function Updater(app_state, onupdate) {
     const { update_state, now } = app_state;
 
     const visual_cache_update = async () => {
         app_state.update_state = "downloading";
-        self = replace(self, Updater(app_state));
+        self = replace(self, Updater(app_state, onupdate));
 
         let groups = await get_groups_raw();
         if (!groups.ok) {
             app_state.update_state = "failed";
-            self = replace(self, Updater(app_state));
+            self = replace(self, Updater(app_state, onupdate));
             console.error("Failed to get groups");
             return;
         }
@@ -1645,7 +1645,7 @@ function Updater(app_state) {
 
         if (!all_schedules_result.ok) {
             app_state.update_state = "failed";
-            self = replace(self, Updater(app_state));
+            self = replace(self, Updater(app_state, onupdate));
             return;
         }
 
@@ -1660,7 +1660,7 @@ function Updater(app_state) {
         app_state.cache_entry = entry;
 
         app_state.update_state = "cached";
-        self = replace(self, Updater(app_state));
+        self = replace(self, Updater(app_state, onupdate));
     }
 
     let time_diff;
@@ -1700,8 +1700,9 @@ function Updater(app_state) {
 
 /**
  * @param {App_State} state
+ * @param {() => void} rerender
  */
-function App(state) {
+function App(state, rerender) {
     /** @type {Day[]} */
     let current_week;
     /** @type {Day[]} */
@@ -1711,8 +1712,8 @@ function App(state) {
         current_week = state.weeks.even;
         next_week = state.weeks.odd;
     } else {
-        current_week = state.weeks.even;
-        next_week = state.weeks.odd;
+        current_week = state.weeks.odd;
+        next_week = state.weeks.even;
     }
 
     /** @param {Schedule_Filter} filter */
@@ -1738,18 +1739,12 @@ function App(state) {
 
     let buttons_el = SelectorButtons(state.show_next, handle_week_select);
 
-    const rerender = () => {
-        self = replace(self, App(state));
-    }
-
-    let self = el("div", { class: "flex-col gap-6", style: "width: 100%;" },
+    return el("div", { class: "flex-col gap-6", style: "width: 100%;" },
         SearchBar(state, rerender),
         BookmarksList(state, rerender),
         selected_week_el,
         buttons_el,
     );
-
-    return self;
 }
 
 
@@ -1798,10 +1793,17 @@ async function main() {
     document.title = `НГТУ ${app_state.filter.value}`;
     app_state.bookmarks = storage_load(BOOKMARK_KEY) ?? [];
 
-    let updater = Updater(app_state);
-    content.append(updater.el);
 
-    let app_el = App(app_state);
+    let app_el = App(app_state, app_rerender);
+    function app_rerender() {
+        app_state.now = new Date();
+        app_el = replace(app_el, App(app_state, app_rerender));
+    }
+
+    let updater = Updater(app_state, app_rerender);
+
+
+    content.append(updater.el);
     content.append(app_el);
 
 
@@ -1816,8 +1818,8 @@ async function main() {
         app_state.search_arrays = resolve_search_arrays(cache.schedule);
         app_state.weeks = resolve_schedule_weeks(cache.schedule, app_state.filter);
 
-        app_el = replace(app_el, App(app_state));
-        updater = replace(updater, Updater(app_state));
+        app_el = replace(app_el, App(app_state, app_rerender));
+        updater = replace(updater, Updater(app_state, app_rerender));
 
         const now = new Date();
         const time_since_update = now.getTime() - cache.entry.date.getTime();
@@ -1826,7 +1828,7 @@ async function main() {
 
     if (should_update) {
         await updater.update();
-        app_el = replace(app_el, App(app_state));
+        app_el = replace(app_el, App(app_state, app_rerender));
     }
 
     window.addEventListener("popstate", (event) => {
@@ -1840,8 +1842,27 @@ async function main() {
         app_state.filter = history_state.filter;
         app_state.weeks = resolve_schedule_weeks(app_state.schedule, app_state.filter);
         app_state.now = new Date();
-        app_el = replace(app_el, App(app_state));
+        app_el = replace(app_el, App(app_state, app_rerender));
     });
+
+
+    /** @type {ReturnType<typeof setInterval> | null} */
+    let rerender_timer = null;
+    window.onfocus = () => {
+        app_rerender();
+
+        if (app_state.update_state === "cached") {
+            updater = replace(updater, Updater(app_state, app_rerender));
+        }
+
+        rerender_timer = setInterval(app_rerender, 60 * 1000);
+    }
+    window.onblur = () => {
+        if (rerender_timer) {
+            clearInterval(rerender_timer);
+            rerender_timer = null;
+        }
+    }
 }
 
 
